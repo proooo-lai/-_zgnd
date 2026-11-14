@@ -3,6 +3,7 @@
 /纸书智伴企业预选赛绘本素材/
 /public/assets/page-*.png
 /data/book.json
+/.local-books/
 
 # Local secrets, caches and generated data
 .env

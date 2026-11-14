@@ -1,4 +1,5 @@
 import { findObjectAt, mapDisplayPoint } from "/src/domain.mjs";
+import { bookInteractionState, questionPayload } from "/src/book-view.mjs";
 
 const $ = (selector) => document.querySelector(selector);
 const state = {
@@ -10,6 +11,7 @@ const state = {
   recognition: null,
   inputMode: "text",
   asrRaw: "",
+  bookRequest: 0,
 };
 
 const pageImage = $("#page-image");
@@ -20,6 +22,27 @@ const questionInput = $("#question-input");
 const sendButton = $(".send-button");
 const conversation = $("#conversation");
 const workflowOutput = $("#workflow-output");
+const bookSelector = $("#book-selector");
+const uploadForm = $("#book-upload-form");
+
+function contentReady() {
+  return bookInteractionState(state.book).contentReady;
+}
+
+function updateBookControls() {
+  const ready = contentReady();
+  const page = currentPage();
+  $("#read-button").disabled = !ready || !page?.text;
+  $("#recognize-button").disabled = !ready || !(page?.objects?.length);
+  $("#preview-button").disabled = state.book?.mode !== "synthetic-local-demo";
+  questionInput.disabled = !ready;
+  $("#voice-button").disabled = !ready;
+  sendButton.disabled = !ready;
+  $("#motion-label").hidden = state.book?.mode !== "synthetic-local-demo";
+  $("#input-status").textContent = ready
+    ? "语音由浏览器提供，处理方式因浏览器而异"
+    : "内容待分析：问答、朗读、识物尚不可用";
+}
 
 function currentPage() {
   return state.book?.pages[state.pageIndex] ?? null;
@@ -38,11 +61,12 @@ function selectPage(index, { preserveFeedback = false } = {}) {
   pageImage.alt = `《${state.book.title}》第 ${page.page_number} 页`;
   $("#page-number").textContent = `第 ${page.page_number} 页`;
   $("#page-position").textContent = `${state.pageIndex + 1} / ${state.book.pages.length}`;
-  $("#page-text").textContent = page.text;
+  $("#page-text").textContent = page.text || bookInteractionState(state.book).pageTextFallback;
   $("#previous-page").disabled = state.pageIndex === 0;
   $("#next-page").disabled = state.pageIndex === state.book.pages.length - 1;
   renderPageChoices();
   renderObjectOverlay();
+  updateBookControls();
   readerStage.classList.remove("is-wobbling");
   if (!preserveFeedback) setFeedback("", "");
 }
@@ -92,6 +116,7 @@ function renderObjectOverlay() {
 }
 
 function setMode(mode) {
+  if (mode === "recognize" && !contentReady()) return;
   state.mode = mode;
   const active = mode === "recognize";
   const button = $("#recognize-button");
@@ -160,7 +185,9 @@ function appendMessage(role, text, evidence = [], { manual = false } = {}) {
 
 function renderRun(run) {
   workflowOutput.replaceChildren();
-  $("#run-summary").textContent = run.outcome === "refused" ? "已拒答" : "已完成";
+  $("#run-summary").textContent = run.status === "awaiting-analysis"
+    ? "页面已导入 · 待分析"
+    : run.outcome === "refused" ? "已拒答" : "已完成";
 
   const id = document.createElement("p");
   id.className = "workflow-id";
@@ -220,6 +247,8 @@ function speakMessage(text, button, { automatic = false } = {}) {
 }
 
 async function askQuestion(question, { inputMode = "text", asrRaw = "" } = {}) {
+  if (!contentReady()) return;
+  const askedBookId = state.book.id;
   appendMessage("user", question);
   sendButton.disabled = true;
   $("#input-status").textContent = "正在查找页面原文";
@@ -228,24 +257,30 @@ async function askQuestion(question, { inputMode = "text", asrRaw = "" } = {}) {
     const response = await fetch("/api/ask", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ question, input_mode: inputMode, asr_raw: asrRaw }),
+      body: JSON.stringify(questionPayload(state.book, question, { inputMode, asrRaw })),
     });
     const result = await response.json();
+    if (state.book?.id !== askedBookId) return;
     if (!response.ok) throw new Error(result.error ?? "暂时无法处理这个问题。");
 
     const answerMessage = appendMessage("assistant", result.answer, result.evidence);
     const runResponse = await fetch(`/api/runs/${encodeURIComponent(result.run_id)}`);
-    if (runResponse.ok) renderRun(await runResponse.json());
+    if (runResponse.ok) {
+      const run = await runResponse.json();
+      if (state.book?.id !== askedBookId) return;
+      renderRun(run);
+    }
     $("#workflow-details").open = true;
     $("#input-status").textContent = result.answerable ? "已附页面来源" : "没有找到页面依据";
     if (inputMode === "voice") {
       speakMessage(result.answer, answerMessage.querySelector(".answer-speech"), { automatic: true });
     }
   } catch (error) {
+    if (state.book?.id !== askedBookId) return;
     appendMessage("assistant", error.message || "暂时无法连接本地服务。");
     $("#input-status").textContent = "请求未完成";
   } finally {
-    sendButton.disabled = false;
+    sendButton.disabled = !contentReady();
   }
 }
 
@@ -283,6 +318,7 @@ function runPreviewStep() {
 }
 
 function togglePreview() {
+  if (state.book?.mode !== "synthetic-local-demo") return;
   if (state.previewTimer) {
     stopPreview("已停止页面动效演示");
     return;
@@ -294,6 +330,7 @@ function togglePreview() {
 }
 
 function speakPage() {
+  if (!contentReady() || !currentPage()?.text) return;
   if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
     setFeedback("此浏览器不支持朗读，可展开“本页原文”查看文字。", "warning");
     return;
@@ -325,6 +362,7 @@ function speakPage() {
 }
 
 function startVoiceInput() {
+  if (!contentReady()) return;
   const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
   if (!Recognition) {
     $("#input-status").textContent = "此浏览器没有语音输入，可直接输入文字";
@@ -374,7 +412,7 @@ function startVoiceInput() {
 }
 
 function recognizeObject(event) {
-  if (state.mode !== "recognize" || event.target.closest("button")) return;
+  if (!contentReady() || state.mode !== "recognize" || event.target.closest("button")) return;
   const page = currentPage();
   const point = mapDisplayPoint(
     event.clientX,
@@ -394,28 +432,126 @@ function recognizeObject(event) {
   appendMessage("assistant", `${object.label}。${object.description}`, [], { manual: true });
 }
 
+function renderBookList(books, selectedId) {
+  bookSelector.replaceChildren();
+  for (const book of books) {
+    const option = document.createElement("option");
+    option.value = book.id;
+    option.textContent = book.title + (book.analysis_status === "pending" ? " · 待分析" : "");
+    bookSelector.append(option);
+  }
+  bookSelector.value = selectedId ?? books[0]?.id ?? "";
+}
+
+async function refreshBookList(selectedId) {
+  const response = await fetch("/api/books");
+  if (!response.ok) throw new Error("无法获取绘本列表。");
+  const { books } = await response.json();
+  renderBookList(books, selectedId);
+}
+
+function showBook(book) {
+  if (state.previewTimer) stopPreview();
+  if (state.recognition) state.recognition.stop();
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  state.book = book;
+  state.pageIndex = 0;
+  state.mode = "read";
+  state.inputMode = "text";
+  state.asrRaw = "";
+  questionInput.value = "";
+  conversation.replaceChildren();
+  workflowOutput.replaceChildren();
+  $("#workflow-details").open = false;
+  $("#run-summary").textContent = "尚无记录";
+  $("#recognize-button").setAttribute("aria-pressed", "false");
+  $("#read-button").querySelector("span").textContent = "朗读";
+  $("#book-title").textContent = book.title;
+  $(".topbar-book").textContent = "绘本 · " + book.title;
+  $("#source-notice").textContent = book.source_notice;
+  $("#book-analysis-status").textContent = bookInteractionState(book).statusLabel;
+  document.title = book.title + " · 纸书智伴";
+  bookSelector.value = book.id;
+  selectPage(0);
+
+  if (bookInteractionState(book).contentReady && book.mode === "synthetic-local-demo") {
+    const opening = book.pages[0];
+    if (opening?.text) {
+      const firstPassage = opening.text.split("。", 1)[0] + "。";
+      appendMessage("assistant", firstPassage,
+        [{ evidence_id: opening.evidence_id, page_number: opening.page_number, excerpt: firstPassage }]);
+    }
+  } else if (!contentReady()) {
+    appendMessage("assistant", "页面预览已就绪。OCR/VLM 尚未分析这本书，因此暂不能问答、识物或朗读。");
+  }
+}
+
+async function loadBook(bookId) {
+  const requestId = ++state.bookRequest;
+  const response = await fetch("/api/books/" + encodeURIComponent(bookId));
+  if (!response.ok) throw new Error("无法载入所选绘本。");
+  const book = await response.json();
+  if (requestId === state.bookRequest) showBook(book);
+}
+
 async function initialize() {
   try {
-    const response = await fetch("/api/book");
-    if (!response.ok) throw new Error("无法载入绘本页面。");
-    state.book = await response.json();
-    $("#book-title").textContent = state.book.title;
-    $(".topbar-book").textContent = `绘本演示 · ${state.book.title}`;
-    $("#source-notice").textContent = state.book.source_notice;
-    document.title = `${state.book.title} · 纸书智伴`;
-    selectPage(0);
-    const opening = state.book.pages[0];
-    const firstPassage = opening.text.split("。", 1)[0] + "。";
-    appendMessage(
-      "assistant",
-      firstPassage,
-      [{ evidence_id: opening.evidence_id, page_number: opening.page_number, excerpt: firstPassage }],
-    );
+    await refreshBookList();
+    await loadBook(bookSelector.value);
   } catch {
     $("#book-title").textContent = "绘本载入失败";
     setFeedback("请确认本地演示服务正在运行。", "warning");
   }
 }
+
+bookSelector.addEventListener("change", async () => {
+  try {
+    await loadBook(bookSelector.value);
+  } catch (error) {
+    setFeedback(error.message, "warning");
+  }
+});
+
+uploadForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const file = $("#book-upload-file").files[0];
+  const title = $("#book-upload-title").value.trim();
+  const status = $("#book-upload-status");
+  if (!file || !title || !$("#rights-confirmed").checked) return;
+  if (file.size > 20 * 1024 * 1024 || file.type !== "application/pdf") {
+    status.textContent = "请选择不超过 20 MB 的 PDF 文件。";
+    return;
+  }
+  const button = $("#book-upload-button");
+  button.disabled = true;
+  status.textContent = "正在校验 PDF 并生成逐页预览……";
+  try {
+    const response = await fetch("/api/books?title=" + encodeURIComponent(title), {
+      method: "POST",
+      headers: { "content-type": "application/pdf", "x-rights-confirmed": "true" },
+      body: file,
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error ?? "导入未完成。");
+    await refreshBookList(result.book_id);
+    ++state.bookRequest;
+    showBook(result.book);
+    const runResponse = await fetch("/api/runs/" + encodeURIComponent(result.run_id));
+    if (runResponse.ok) {
+      const run = await runResponse.json();
+      if (state.book?.id === result.book_id) {
+        renderRun(run);
+        $("#workflow-details").open = true;
+      }
+    }
+    uploadForm.reset();
+    status.textContent = "导入完成：已生成逐页预览，内容理解仍待模型处理。";
+  } catch (error) {
+    status.textContent = error.message || "导入未完成，请重试。";
+  } finally {
+    button.disabled = false;
+  }
+});
 
 $("#previous-page").addEventListener("click", () => selectPage(state.pageIndex - 1));
 $("#next-page").addEventListener("click", () => selectPage(state.pageIndex + 1));
@@ -438,7 +574,7 @@ $("#question-form").addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return;
   if (event.key === "ArrowLeft") selectPage(state.pageIndex - 1);
   if (event.key === "ArrowRight") selectPage(state.pageIndex + 1);
 });

@@ -35,6 +35,28 @@
 
       <main class="workspace">
         <section class="reader" aria-labelledby="book-title">
+          <section class="book-library" aria-label="绘本书架">
+            <div class="book-picker">
+              <label for="book-selector">选择绘本</label>
+              <select id="book-selector" aria-label="选择绘本"></select>
+              <span id="book-analysis-status" class="book-analysis-status" aria-live="polite">正在载入</span>
+            </div>
+            <details class="book-upload">
+              <summary>导入一本绘本</summary>
+              <form id="book-upload-form">
+                <label for="book-upload-title">书名</label>
+                <input id="book-upload-title" name="title" maxlength="100" required placeholder="输入绘本名称" />
+                <label for="book-upload-file">PDF 文件（最多 20 MB、40 页）</label>
+                <input id="book-upload-file" name="file" type="file" accept="application/pdf,.pdf" required />
+                <label class="rights-label" for="rights-confirmed">
+                  <input id="rights-confirmed" type="checkbox" required />
+                  我确认拥有本赛事开发与演示所需的使用授权
+                </label>
+                <button id="book-upload-button" class="tool-button" type="submit">上传并生成页面预览</button>
+                <p id="book-upload-status" class="book-upload-status" role="status">PDF 仅保存在本机；上传后需接入模型完成内容理解。</p>
+              </form>
+            </details>
+          </section>
           <header class="reader-heading">
             <div>
               <p class="eyebrow">亲子伴读</p>

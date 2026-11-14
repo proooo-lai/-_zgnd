@@ -49,6 +49,22 @@ test("serves the reading interface, shared domain logic, and original illustrati
   });
 });
 
+test("serves book selection, upload controls, and shared interaction rules", async () => {
+  await withServer(async (baseUrl) => {
+    const [htmlResponse, rulesResponse] = await Promise.all([
+      fetch(baseUrl),
+      fetch(baseUrl + "/src/book-view.mjs"),
+    ]);
+    const html = await htmlResponse.text();
+    assert.equal(htmlResponse.status, 200);
+    assert.match(html, /id="book-selector"/);
+    assert.match(html, /id="book-upload-form"/);
+    assert.match(html, /id="rights-confirmed"/);
+    assert.equal(rulesResponse.status, 200);
+    assert.match(await rulesResponse.text(), /bookInteractionState/);
+  });
+});
+
 test("returns grounded answers and a retrievable workflow run", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/ask`, {

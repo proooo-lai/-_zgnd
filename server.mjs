@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { findEvidence } from "./src/domain.mjs";
+import { createBookStore } from "./src/books.mjs";
 
 const bookFile = process.env.BOOK_DATA_FILE
   ? resolve(process.env.BOOK_DATA_FILE)
@@ -13,11 +14,13 @@ const book = JSON.parse(readFileSync(bookFile, "utf8"));
 const runs = new Map();
 const MAX_RUNS = 100;
 const MAX_BODY_BYTES = 4096;
+const MAX_PDF_BYTES = 20 * 1024 * 1024;
 
 const staticFiles = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
   ["/index.html", ["index.html", "text/html; charset=utf-8"]],
   ["/src/domain.mjs", ["../src/domain.mjs", "text/javascript; charset=utf-8"]],
+  ["/src/book-view.mjs", ["../src/book-view.mjs", "text/javascript; charset=utf-8"]],
   ["/app.js", ["app.js", "text/javascript; charset=utf-8"]],
   ["/styles.css", ["styles.css", "text/css; charset=utf-8"]],
 ]);
@@ -60,6 +63,21 @@ async function readJson(request) {
   }
 }
 
+async function readPdf(request) {
+  const chunks = [];
+  let length = 0;
+  for await (const chunk of request) {
+    length += chunk.length;
+    if (length > MAX_PDF_BYTES) {
+      const error = new Error("PDF 最多支持 20 MB。");
+      error.status = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
 function buildAnswer(question, evidence) {
   if (!evidence.length) {
     return "在目前加载的绘本页面中找不到可支持这个问题的原文，我暂时无法确认。";
@@ -73,7 +91,7 @@ function buildAnswer(question, evidence) {
   return answer;
 }
 
-function createQuestionRun(question, { inputMode, rawQuestion, asrRaw }) {
+function createQuestionRun(question, book, { inputMode, rawQuestion, asrRaw }) {
   const startedAt = performance.now();
   const runId = randomUUID();
   const evidenceStartedAt = performance.now();
@@ -90,6 +108,7 @@ function createQuestionRun(question, { inputMode, rawQuestion, asrRaw }) {
     outcome: answerable ? "answered" : "refused",
     mode: "local-evidence-demo",
     input: {
+      book_id: book.id,
       mode: inputMode,
       raw_question: rawQuestion,
       raw_asr_transcript: inputMode === "voice" ? asrRaw : null,
@@ -159,7 +178,8 @@ async function serveStatic(pathname, response) {
   return true;
 }
 
-export function createServer() {
+export function createServer({ bookStorageDir = resolve(".local-books") } = {}) {
+  const bookStore = createBookStore({ storageDir: bookStorageDir, defaultBook: book });
   return createHttpServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     const { pathname } = url;
@@ -172,6 +192,68 @@ export function createServer() {
 
       if (request.method === "GET" && pathname === "/api/book") {
         sendJson(response, 200, book);
+        return;
+      }
+
+      if (request.method === "GET" && pathname === "/api/books") {
+        sendJson(response, 200, { books: await bookStore.listBooks() });
+        return;
+      }
+
+      if (request.method === "POST" && pathname === "/api/books") {
+        if (request.headers["x-rights-confirmed"] !== "true") {
+          sendJson(response, 400, { error: "请先确认拥有本赛事开发与演示所需的使用授权。" });
+          return;
+        }
+        if (request.headers["content-type"]?.split(";", 1)[0] !== "application/pdf") {
+          sendJson(response, 415, { error: "目前只支持 PDF 绘本。" });
+          return;
+        }
+        const imported = await bookStore.importPdf({ title: url.searchParams.get("title"), bytes: await readPdf(request) });
+        const runId = randomUUID();
+        runs.set(runId, {
+          run_id: runId,
+          created_at: new Date().toISOString(),
+          status: "awaiting-analysis",
+          mode: "local-pdf-import",
+          input: { book_id: imported.id, title: imported.title, page_count: imported.pages.length },
+          steps: [
+            { id: "pdf-validation", status: "completed" },
+            { id: "page-preview", status: "completed" },
+            { id: "ocr-vlm", status: "pending", detail: "尚未接入模型 API。" },
+          ],
+          result: { book_id: imported.id, analysis_status: imported.analysis_status },
+        });
+        if (runs.size > MAX_RUNS) runs.delete(runs.keys().next().value);
+        sendJson(response, 201, { book_id: imported.id, run_id: runId, book: imported });
+        return;
+      }
+
+      const pageMatch = pathname.match(new RegExp("^/api/books/([0-9a-f-]{36})/pages/([0-9]+)\\.png$", "u"));
+      if (request.method === "GET" && pageMatch) {
+        const image = await bookStore.getPageAsset(pageMatch[1], Number(pageMatch[2]));
+        if (!image) {
+          sendJson(response, 404, { error: "未找到此页。" });
+          return;
+        }
+        response.writeHead(200, {
+          "content-type": "image/png",
+          "content-length": image.length,
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+        });
+        response.end(image);
+        return;
+      }
+
+      const bookId = pathname.match(new RegExp("^/api/books/([0-9a-f-]{36}|original-garden-demo)$", "u"))?.[1];
+      if (request.method === "GET" && bookId) {
+        const selectedBook = await bookStore.getBook(bookId);
+        if (!selectedBook) {
+          sendJson(response, 404, { error: "未找到这本绘本。" });
+          return;
+        }
+        sendJson(response, 200, selectedBook);
         return;
       }
 
@@ -193,7 +275,16 @@ export function createServer() {
           return;
         }
 
-        const run = createQuestionRun(question, { inputMode, rawQuestion, asrRaw });
+        const selectedBook = body?.book_id ? await bookStore.getBook(body.book_id) : book;
+        if (!selectedBook) {
+          sendJson(response, 404, { error: "未找到这本绘本。" });
+          return;
+        }
+        if (selectedBook.analysis_status === "pending") {
+          sendJson(response, 409, { code: "analysis_pending", error: "这本绘本尚未完成 OCR/VLM 分析，目前无法基于它回答。" });
+          return;
+        }
+        const run = createQuestionRun(question, selectedBook, { inputMode, rawQuestion, asrRaw });
         sendJson(response, 200, {
           run_id: run.run_id,
           status: run.status,

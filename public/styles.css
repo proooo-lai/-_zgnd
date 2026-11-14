@@ -115,6 +115,7 @@ button { color: inherit; }
 .rights-label { display: flex; align-items: flex-start; gap: 7px; line-height: 1.5; }
 .rights-label input { margin-top: 3px; }
 .book-upload form > button { width: fit-content; }
+.analyze-book-button { width: fit-content; }
 .book-upload-status { margin: 0; color: var(--muted); line-height: 1.5; }
 .tool-button:disabled { opacity: 0.5; cursor: not-allowed; }
 

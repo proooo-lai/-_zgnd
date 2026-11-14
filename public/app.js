@@ -24,6 +24,12 @@ const conversation = $("#conversation");
 const workflowOutput = $("#workflow-output");
 const bookSelector = $("#book-selector");
 const uploadForm = $("#book-upload-form");
+const analyzeButton = $("#analyze-book-button");
+const modelNotice = $("#model-notice");
+
+function analysisStatus(book) {
+  return book?.analysis_status ?? (book?.mode === "synthetic-local-demo" ? "demo-manual" : "pending");
+}
 
 function contentReady() {
   return bookInteractionState(state.book).contentReady;
@@ -32,6 +38,7 @@ function contentReady() {
 function updateBookControls() {
   const ready = contentReady();
   const page = currentPage();
+  const status = analysisStatus(state.book);
   $("#read-button").disabled = !ready || !page?.text;
   $("#recognize-button").disabled = !ready || !(page?.objects?.length);
   $("#preview-button").disabled = state.book?.mode !== "synthetic-local-demo";
@@ -42,6 +49,16 @@ function updateBookControls() {
   $("#input-status").textContent = ready
     ? "语音由浏览器提供，处理方式因浏览器而异"
     : "内容待分析：问答、朗读、识物尚不可用";
+  analyzeButton.hidden = !state.book || state.book.mode === "synthetic-local-demo" || status === "completed";
+  analyzeButton.disabled = status === "analyzing";
+  analyzeButton.textContent = status === "failed" ? "重试内容分析" : status === "analyzing" ? "内容分析中" : "开始内容分析";
+  if (modelNotice) {
+    modelNotice.textContent = status === "demo-manual"
+      ? "本地演示 · 人工内容"
+      : status === "completed"
+        ? `百炼视觉分析 · ${state.book.analysis_version ?? "已记录模型版本"}`
+        : status === "analyzing" ? "百炼视觉分析 · 分析中" : status === "failed" ? "百炼视觉分析 · 分析失败" : "百炼视觉分析 · 待执行";
+  }
 }
 
 function currentPage() {
@@ -187,7 +204,9 @@ function renderRun(run) {
   workflowOutput.replaceChildren();
   $("#run-summary").textContent = run.status === "awaiting-analysis"
     ? "页面已导入 · 待分析"
-    : run.outcome === "refused" ? "已拒答" : "已完成";
+    : run.status === "running" ? "内容分析中"
+      : run.status === "failed" ? "分析失败"
+        : run.outcome === "refused" ? "已拒答" : "已完成";
 
   const id = document.createElement("p");
   id.className = "workflow-id";
@@ -494,6 +513,35 @@ async function loadBook(bookId) {
   if (requestId === state.bookRequest) showBook(book);
 }
 
+async function analyzeBook() {
+  if (!state.book || analyzeButton.disabled || analyzeButton.hidden) return;
+  const bookId = state.book.id;
+  analyzeButton.disabled = true;
+  $("#book-analysis-status").textContent = "分析中 · 仅可预览";
+  $("#book-upload-status").textContent = "正在调用百炼视觉模型逐页分析，期间不会启用问答或识物……";
+  try {
+    const response = await fetch(`/api/books/${encodeURIComponent(bookId)}/analyze`, { method: "POST" });
+    const result = await response.json();
+    if (result.book && state.book?.id === bookId) {
+      showBook(result.book);
+      if (result.run) {
+        renderRun(result.run);
+        $("#workflow-details").open = true;
+      }
+      await refreshBookList(bookId);
+    }
+    if (!response.ok) throw new Error(result.error ?? "内容分析未完成。");
+    $("#book-upload-status").textContent = "内容分析完成：已保存模型版本和逐页结果。";
+  } catch (error) {
+    if (state.book?.id === bookId) {
+      $("#book-analysis-status").textContent = "分析失败 · 可重试";
+      $("#book-upload-status").textContent = error.message || "内容分析未完成，请重试。";
+    }
+  } finally {
+    if (state.book?.id === bookId) updateBookControls();
+  }
+}
+
 async function initialize() {
   try {
     await refreshBookList();
@@ -552,6 +600,8 @@ uploadForm.addEventListener("submit", async (event) => {
     button.disabled = false;
   }
 });
+
+analyzeButton.addEventListener("click", analyzeBook);
 
 $("#previous-page").addEventListener("click", () => selectPage(state.pageIndex - 1));
 $("#next-page").addEventListener("click", () => selectPage(state.pageIndex + 1));

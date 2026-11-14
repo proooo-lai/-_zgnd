@@ -56,6 +56,7 @@
                 <p id="book-upload-status" class="book-upload-status" role="status">PDF 仅保存在本机；上传后需接入模型完成内容理解。</p>
               </form>
             </details>
+            <button id="analyze-book-button" class="tool-button analyze-book-button" type="button" hidden>开始内容分析</button>
           </section>
           <header class="reader-heading">
             <div>
@@ -140,7 +141,7 @@
 
       <footer class="app-footer">
         <span id="source-notice">正在加载来源说明</span>
-        <span>本地原文检索 · 未连接生成模型</span>
+        <span id="model-notice">模型状态：正在载入</span>
       </footer>
     </div>
   </body>

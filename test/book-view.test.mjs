@@ -13,6 +13,7 @@ test("only the explicit manual demo and completed analysis allow content interac
   assert.equal(bookInteractionState({ id: "demo", analysis_status: "demo-manual" }).contentReady, true);
   assert.equal(bookInteractionState({ id: "ready", analysis_status: "completed" }).contentReady, true);
   assert.equal(bookInteractionState({ id: "unknown", analysis_status: "failed" }).contentReady, false);
+  assert.match(bookInteractionState({ id: "running", analysis_status: "analyzing" }).statusLabel, /分析中/);
 });
 
 test("question payload always identifies the selected book", () => {

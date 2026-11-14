@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { findEvidence } from "./src/domain.mjs";
 import { createBookStore } from "./src/books.mjs";
+import { createBailianVisionClient } from "./src/bailian.mjs";
 
 const bookFile = process.env.BOOK_DATA_FILE
   ? resolve(process.env.BOOK_DATA_FILE)
@@ -91,6 +92,12 @@ function buildAnswer(question, evidence) {
   return answer;
 }
 
+function rememberRun(run) {
+  runs.set(run.run_id, run);
+  if (runs.size > MAX_RUNS) runs.delete(runs.keys().next().value);
+  return run;
+}
+
 function createQuestionRun(question, book, { inputMode, rawQuestion, asrRaw }) {
   const startedAt = performance.now();
   const runId = randomUUID();
@@ -152,10 +159,7 @@ function createQuestionRun(question, book, { inputMode, rawQuestion, asrRaw }) {
     total_duration_ms: totalDuration,
   };
 
-  runs.set(runId, run);
-  if (runs.size > MAX_RUNS) runs.delete(runs.keys().next().value);
-
-  return run;
+  return rememberRun(run);
 }
 
 async function serveStatic(pathname, response) {
@@ -178,7 +182,10 @@ async function serveStatic(pathname, response) {
   return true;
 }
 
-export function createServer({ bookStorageDir = resolve(".local-books") } = {}) {
+export function createServer({
+  bookStorageDir = resolve(".local-books"),
+  visionClient = createBailianVisionClient(),
+} = {}) {
   const bookStore = createBookStore({ storageDir: bookStorageDir, defaultBook: book });
   return createHttpServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -211,7 +218,7 @@ export function createServer({ bookStorageDir = resolve(".local-books") } = {}) 
         }
         const imported = await bookStore.importPdf({ title: url.searchParams.get("title"), bytes: await readPdf(request) });
         const runId = randomUUID();
-        runs.set(runId, {
+        rememberRun({
           run_id: runId,
           created_at: new Date().toISOString(),
           status: "awaiting-analysis",
@@ -224,7 +231,6 @@ export function createServer({ bookStorageDir = resolve(".local-books") } = {}) 
           ],
           result: { book_id: imported.id, analysis_status: imported.analysis_status },
         });
-        if (runs.size > MAX_RUNS) runs.delete(runs.keys().next().value);
         sendJson(response, 201, { book_id: imported.id, run_id: runId, book: imported });
         return;
       }
@@ -243,6 +249,84 @@ export function createServer({ bookStorageDir = resolve(".local-books") } = {}) 
           "x-content-type-options": "nosniff",
         });
         response.end(image);
+        return;
+      }
+
+      const analyzeMatch = pathname.match(new RegExp("^/api/books/([0-9a-f-]{36})/analyze$", "u"));
+      if (request.method === "POST" && analyzeMatch) {
+        const bookId = analyzeMatch[1];
+        const selectedBook = await bookStore.getBook(bookId);
+        if (!selectedBook) {
+          sendJson(response, 404, { error: "未找到这本绘本。" });
+          return;
+        }
+        if (selectedBook.mode === "synthetic-local-demo") {
+          sendJson(response, 400, { code: "analysis_not_supported", error: "原创演示绘本不需要重复分析。" });
+          return;
+        }
+        if (selectedBook.analysis_status === "analyzing") {
+          sendJson(response, 409, { code: "analysis_in_progress", error: "这本绘本正在分析中。" });
+          return;
+        }
+
+        const runId = randomUUID();
+        const run = rememberRun({
+          run_id: runId,
+          created_at: new Date().toISOString(),
+          status: "running",
+          mode: "bailian-vision-analysis",
+          input: { book_id: bookId, page_count: selectedBook.pages.length },
+          steps: [
+            { id: "analysis-configuration", status: "completed", detail: `模型：${visionClient.model ?? "configured-vision-model"}` },
+            { id: "page-analysis", status: "running", output: { completed_pages: 0, total_pages: selectedBook.pages.length } },
+          ],
+        });
+        await bookStore.updateAnalysis(bookId, { status: "analyzing" });
+        try {
+          const pages = [];
+          for (const page of selectedBook.pages) {
+            const imageBytes = await bookStore.getPageAsset(bookId, page.page_number);
+            const analysis = await visionClient.analyzePage({ page, imageBytes });
+            pages.push(analysis);
+            run.steps[1].output.completed_pages = pages.length;
+          }
+          const analyzedAt = new Date().toISOString();
+          const analysisDocument = {
+            schema_version: 1,
+            book_id: bookId,
+            analyzed_at: analyzedAt,
+            model: {
+              provider: "dashscope",
+              id: visionClient.model ?? "configured-vision-model",
+              base_url: visionClient.baseUrl ?? null,
+            },
+            pages,
+          };
+          const completedBook = await bookStore.updateAnalysis(bookId, {
+            status: "completed",
+            analysis: analysisDocument,
+          });
+          run.status = "completed";
+          run.completed_at = analyzedAt;
+          run.steps[1].status = "completed";
+          run.result = { book_id: bookId, analysis_status: "completed", page_count: pages.length };
+          sendJson(response, 200, { run_id: runId, status: run.status, book: completedBook, run });
+        } catch (error) {
+          const failedAt = new Date().toISOString();
+          const failedBook = await bookStore.updateAnalysis(bookId, { status: "failed", error });
+          run.status = "failed";
+          run.completed_at = failedAt;
+          run.error = { code: error.code ?? "analysis_failed", message: error.message };
+          run.steps[1].status = "failed";
+          run.steps[1].error = run.error;
+          run.result = { book_id: bookId, analysis_status: "failed" };
+          sendJson(response, error.status ?? 502, {
+            code: error.code ?? "analysis_failed",
+            error: error.message || "绘本分析失败。",
+            run,
+            book: failedBook,
+          });
+        }
         return;
       }
 
@@ -280,8 +364,18 @@ export function createServer({ bookStorageDir = resolve(".local-books") } = {}) 
           sendJson(response, 404, { error: "未找到这本绘本。" });
           return;
         }
-        if (selectedBook.analysis_status === "pending") {
-          sendJson(response, 409, { code: "analysis_pending", error: "这本绘本尚未完成 OCR/VLM 分析，目前无法基于它回答。" });
+        const selectedAnalysisStatus = selectedBook.analysis_status
+          ?? (selectedBook.mode === "synthetic-local-demo" ? "demo-manual" : "pending");
+        if (selectedAnalysisStatus !== "completed" && selectedAnalysisStatus !== "demo-manual") {
+          const code = selectedAnalysisStatus === "failed"
+            ? "analysis_failed"
+            : selectedAnalysisStatus === "analyzing" ? "analysis_in_progress" : "analysis_pending";
+          const message = code === "analysis_failed"
+            ? `这本绘本的内容分析失败：${selectedBook.analysis_error?.message ?? "请重试分析。"}`
+            : code === "analysis_in_progress"
+              ? "这本绘本正在分析中，请稍后再试。"
+              : "这本绘本尚未完成 OCR/VLM 分析，目前无法基于它回答。";
+          sendJson(response, 409, { code, error: message });
           return;
         }
         const run = createQuestionRun(question, selectedBook, { inputMode, rawQuestion, asrRaw });

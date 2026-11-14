@@ -60,6 +60,7 @@ test("serves book selection, upload controls, and shared interaction rules", asy
     assert.match(html, /id="book-selector"/);
     assert.match(html, /id="book-upload-form"/);
     assert.match(html, /id="rights-confirmed"/);
+    assert.match(html, /id="analyze-book-button"/);
     assert.equal(rulesResponse.status, 200);
     assert.match(await rulesResponse.text(), /bookInteractionState/);
   });

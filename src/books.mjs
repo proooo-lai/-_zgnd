@@ -29,10 +29,51 @@ async function readManifest(storageDir, bookId) {
   }
 }
 
+async function readAnalysis(storageDir, bookId) {
+  try {
+    return JSON.parse(await readFile(join(storageDir, bookId, "analysis.json"), "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function mergeAnalysis(book, analysis) {
+  if (book.analysis_status !== "completed" || !analysis?.pages || !Array.isArray(analysis.pages)) return book;
+  const byPage = new Map(analysis.pages.map((page) => [page.page_number, page]));
+  return {
+    ...book,
+    analysis_version: analysis.model?.id ?? null,
+    analyzed_at: analysis.analyzed_at ?? null,
+    pages: book.pages.map((page) => {
+      const result = byPage.get(page.page_number);
+      if (!result) return page;
+      return {
+        ...page,
+        evidence_id: `${page.id}-evidence`,
+        text: result.text,
+        text_source: "model",
+        analysis_source: {
+          type: "vision-model",
+          model: analysis.model?.id ?? null,
+        },
+        objects: result.objects,
+        analysis_status: "completed",
+        characters: result.characters,
+        scenes: result.scenes,
+        relations: result.relations,
+        uncertainties: result.uncertainties,
+      };
+    }),
+  };
+}
+
 export function createBookStore({ storageDir, defaultBook }) {
   async function getBook(bookId) {
     if (bookId === defaultBook.id) return defaultBook;
-    return readManifest(storageDir, bookId);
+    const manifest = await readManifest(storageDir, bookId);
+    if (!manifest) return null;
+    return mergeAnalysis(manifest, await readAnalysis(storageDir, bookId));
   }
 
   async function listBooks() {
@@ -128,11 +169,48 @@ export function createBookStore({ storageDir, defaultBook }) {
     }
   }
 
+  async function updateAnalysis(bookId, {
+    status,
+    analysis = null,
+    error = null,
+  }) {
+    const manifest = await readManifest(storageDir, bookId);
+    if (!manifest) return null;
+    if (!["pending", "analyzing", "completed", "failed"].includes(status)) {
+      throw new Error("无效的分析状态。");
+    }
+    const nextManifest = {
+      ...manifest,
+      analysis_status: status,
+      analysis_error: error ? { code: error.code ?? "analysis_failed", message: error.message } : null,
+      source_notice: status === "completed"
+        ? "页面文字、人物、场景、对象和关系由已记录版本的视觉模型分析；原始 PDF 与分析结果分别保存。"
+        : status === "analyzing"
+          ? "PDF 页面已保存，正在调用视觉模型分析；分析完成前不能进行问答或识物。"
+          : status === "failed"
+            ? `视觉模型分析失败：${error?.message ?? "请重试。"}`
+            : manifest.source_notice,
+      pages: manifest.pages.map((page) => ({
+        ...page,
+        analysis_status: status === "completed" ? "completed" : status,
+      })),
+    };
+    const manifestPath = join(storageDir, bookId, "book.json");
+    await writeFile(`${manifestPath}.tmp`, JSON.stringify(nextManifest, null, 2));
+    await rename(`${manifestPath}.tmp`, manifestPath);
+    if (analysis) {
+      const analysisPath = join(storageDir, bookId, "analysis.json");
+      await writeFile(`${analysisPath}.tmp`, JSON.stringify(analysis, null, 2));
+      await rename(`${analysisPath}.tmp`, analysisPath);
+    }
+    return getBook(bookId);
+  }
+
   async function getPageAsset(bookId, pageNumber) {
     const book = await getBook(bookId);
     if (!book || book.id === defaultBook.id || !Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > book.pages.length) return null;
     return readFile(join(storageDir, bookId, "page-" + String(pageNumber).padStart(2, "0") + ".png"));
   }
 
-  return { getBook, listBooks, importPdf, getPageAsset };
+  return { getBook, listBooks, importPdf, updateAnalysis, getPageAsset };
 }

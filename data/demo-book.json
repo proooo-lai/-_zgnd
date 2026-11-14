@@ -1,0 +1,37 @@
+{
+  "id": "original-garden-demo",
+  "title": "花园里的风筝",
+  "edition": "项目原创公开示例",
+  "mode": "synthetic-local-demo",
+  "source_notice": "此书、文字与 SVG 插画是项目自制示例，供公开代码演示。原文与对象框均为人工编写；页面轻动效与问答为本地演示，语音由浏览器提供，未调用 OCR、VLM 或视频生成模型。",
+  "pages": [
+    {
+      "id": "garden-page-01",
+      "evidence_id": "garden-p01-text-01",
+      "page_number": 1,
+      "asset": "/assets/garden-01.svg",
+      "width": 960,
+      "height": 540,
+      "text": "小鹿在花园里捡到红色风筝。小鸟站在树枝上唱歌。",
+      "text_source": "original-manual",
+      "objects": [
+        {"id": "kite-p01", "label": "红色风筝", "box": [0.62, 0.28, 0.2, 0.38], "description": "红色风筝有四个角和一条飘动的尾巴。", "annotation_source": "original-manual"},
+        {"id": "deer-p01", "label": "小鹿", "box": [0.18, 0.34, 0.25, 0.45], "description": "小鹿在花园里发现了风筝。", "annotation_source": "original-manual"}
+      ]
+    },
+    {
+      "id": "garden-page-02",
+      "evidence_id": "garden-p02-text-01",
+      "page_number": 2,
+      "asset": "/assets/garden-02.svg",
+      "width": 960,
+      "height": 540,
+      "text": "一阵风吹来，红色风筝挂在树枝上。小鸟帮小鹿把风筝取下来。",
+      "text_source": "original-manual",
+      "objects": [
+        {"id": "bird-p02", "label": "小鸟", "box": [0.59, 0.29, 0.19, 0.19], "description": "小鸟在树枝旁帮忙。", "annotation_source": "original-manual"},
+        {"id": "kite-p02", "label": "红色风筝", "box": [0.36, 0.26, 0.2, 0.31], "description": "红色风筝被风吹到树枝上。", "annotation_source": "original-manual"}
+      ]
+    }
+  ]
+}

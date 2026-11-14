@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" role="img" aria-label="花园里，小鹿发现一只红色风筝">
+  <rect width="960" height="540" fill="#f7f3dd"/><path d="M0 380 Q240 335 480 385 T960 365V540H0Z" fill="#b7dba2"/>
+  <circle cx="800" cy="90" r="45" fill="#f6d47a"/>
+  <path d="M130 370 Q190 300 245 370Z" fill="#81b582"/><path d="M80 390 Q160 310 230 390Z" fill="#699c70"/>
+  <ellipse cx="285" cy="367" rx="100" ry="74" fill="#d39f73"/><circle cx="265" cy="272" r="56" fill="#d39f73"/>
+  <path d="M230 232 L213 176 L247 216M287 221 L302 166 L311 223" fill="#d39f73" stroke="#8a624e" stroke-width="7"/>
+  <circle cx="244" cy="267" r="5" fill="#283433"/><circle cx="282" cy="267" r="5" fill="#283433"/>
+  <ellipse cx="263" cy="289" rx="10" ry="6" fill="#8a624e"/>
+  <path d="M226 425v58m98-57v56" stroke="#9c6e57" stroke-width="20" stroke-linecap="round"/>
+  <path d="M695 180 L765 250 L695 320 L625 250Z" fill="#d85d4d" stroke="#a83f42" stroke-width="7"/>
+  <path d="M695 180v140m-70-70h140" stroke="#f9d9a3" stroke-width="5"/><path d="M695 320q-35 25-5 46t-5 38" fill="none" stroke="#745d52" stroke-width="4"/>
+  <path d="M610 145q30-30 60 0q-30-10-60 0" fill="#7baac4"/><circle cx="637" cy="136" r="18" fill="#7baac4"/>
+  <text x="56" y="68" font-size="30" fill="#35574c" font-family="sans-serif">花园里的风筝 · 1</text>
+</svg>

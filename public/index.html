@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8faf8" />
+    <title>纸书智伴 · 本地演示</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <svg class="icon-library" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <symbol id="icon-arrow-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></symbol>
+      <symbol id="icon-arrow-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
+      <symbol id="icon-volume" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.5 5.5a9 9 0 0 1 0 13" /></symbol>
+      <symbol id="icon-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8" /></symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24"><path d="m8 5 12 7-12 7z" /></symbol>
+      <symbol id="icon-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></symbol>
+      <symbol id="icon-hand" viewBox="0 0 24 24"><path d="M8 11V5a1.5 1.5 0 0 1 3 0v5-6a1.5 1.5 0 0 1 3 0v6-4a1.5 1.5 0 0 1 3 0v6-2a1.5 1.5 0 0 1 3 0v5a7 7 0 0 1-7 7h-2a6 6 0 0 1-4.2-1.8l-3.1-3.1a1.8 1.8 0 0 1 2.5-2.5L8 16" /></symbol>
+      <symbol id="icon-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" /></symbol>
+      <symbol id="icon-sound" viewBox="0 0 24 24"><path d="M4 10v4m4-7v10m4-13v16m4-13v10m4-7v4" /></symbol>
+    </svg>
+
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="纸书智伴首页">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span>纸书智伴</span>
+        </a>
+        <div class="topbar-meta">
+          <span class="topbar-book">绘本演示</span>
+          <span class="demo-status"><span class="status-dot"></span>本地演示</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="reader" aria-labelledby="book-title">
+          <header class="reader-heading">
+            <div>
+              <p class="eyebrow">亲子伴读</p>
+              <h1 id="book-title">正在加载绘本</h1>
+            </div>
+            <div class="page-readout" aria-live="polite">
+              <span id="page-number">—</span>
+              <span id="page-position">—</span>
+            </div>
+          </header>
+
+          <div class="reader-stage" id="reader-stage">
+            <img id="page-image" class="page-image" alt="绘本页面" draggable="false" />
+            <div id="object-overlay" class="object-overlay" aria-hidden="true"></div>
+            <span class="motion-label" id="motion-label">页面动效演示</span>
+          </div>
+
+          <div class="reader-controls">
+            <div class="primary-tools" role="group" aria-label="阅读控制">
+              <button class="tool-button tool-primary" id="read-button" type="button" title="朗读当前页">
+                <svg aria-hidden="true"><use href="#icon-volume" /></svg><span>朗读</span>
+              </button>
+              <button class="tool-button" id="recognize-button" type="button" aria-pressed="false" title="切换画面识物">
+                <svg aria-hidden="true"><use href="#icon-hand" /></svg><span>画面识物</span>
+              </button>
+              <button class="tool-button" id="preview-button" type="button" title="播放页面动效演示">
+                <svg aria-hidden="true"><use href="#icon-play" /></svg><span>互动预览</span>
+              </button>
+            </div>
+            <div class="page-navigation" role="group" aria-label="绘本翻页">
+              <button class="icon-button" id="previous-page" type="button" aria-label="上一页" title="上一页">
+                <svg aria-hidden="true"><use href="#icon-arrow-left" /></svg>
+              </button>
+              <div class="page-choices" id="page-choices" aria-label="选择页面"></div>
+              <button class="icon-button" id="next-page" type="button" aria-label="下一页" title="下一页">
+                <svg aria-hidden="true"><use href="#icon-arrow-right" /></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="reader-feedback" id="reader-feedback" aria-live="polite"></div>
+          <details class="page-transcript">
+            <summary>本页原文</summary>
+            <p id="page-text"></p>
+          </details>
+        </section>
+
+        <aside class="companion" aria-labelledby="companion-title">
+          <header class="companion-heading">
+            <div>
+              <p class="eyebrow">阅读陪伴</p>
+              <h2 id="companion-title">故事问答</h2>
+            </div>
+            <span class="evidence-mode"><svg aria-hidden="true"><use href="#icon-sound" /></svg>原文依据</span>
+          </header>
+
+          <div class="conversation" id="conversation" aria-live="polite" aria-relevant="additions"></div>
+
+          <form class="question-form" id="question-form">
+            <label class="visually-hidden" for="question-input">绘本问题</label>
+            <input id="question-input" name="question" maxlength="200" autocomplete="off" placeholder="问问故事……" />
+            <div class="input-actions">
+              <p class="input-status" id="input-status" aria-live="polite">语音由浏览器提供，处理方式因浏览器而异</p>
+              <div class="input-buttons">
+                <button class="icon-button mic-button" id="voice-button" type="button" aria-label="语音输入" title="语音输入">
+                  <svg aria-hidden="true"><use href="#icon-mic" /></svg>
+                </button>
+                <button class="icon-button send-button" type="submit" aria-label="发送问题" title="发送问题">
+                  <svg aria-hidden="true"><use href="#icon-send" /></svg>
+                </button>
+              </div>
+            </div>
+          </form>
+
+          <details class="workflow-details" id="workflow-details">
+            <summary>运行记录 <span id="run-summary">尚无记录</span></summary>
+            <div id="workflow-output" class="workflow-output"></div>
+          </details>
+        </aside>
+      </main>
+
+      <footer class="app-footer">
+        <span id="source-notice">正在加载来源说明</span>
+        <span>本地原文检索 · 未连接生成模型</span>
+      </footer>
+    </div>
+  </body>
+</html>

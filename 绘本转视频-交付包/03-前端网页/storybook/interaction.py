@@ -546,10 +546,15 @@ class Interactor:
         # Generated footage always uses the actual clicked frame, never original-page boxes.
         if not match and self.provider.available("vision"):
             image = await self.frame(book, timestamp, folder / "frame.jpg", frame)
+            # Source-page geometry is not valid in generated footage. Sending
+            # it as context can cause the model to copy an obsolete box even
+            # when it receives the actual frame; only names help identification.
+            source_names = [{key: obj.get(key, "") for key in ("label", "label_zh", "label_en")}
+                            for obj in page.get("objects", []) if isinstance(obj, dict)]
             prompt = (UNTRUSTED_CONTENT_RULE + f'\n识别当前视频帧归一化点击坐标({x:.5f},{y:.5f})指向的最小独立语义对象。'
                 '不要将整幅图或邻近但未点击的对象当目标。遮挡、背景、空白或看不清就found=false。不要只根据原书对象猜测。'
                 '\n输出JSON {"found":true,"label":"对象名称","description":"面向儿童的简短事实介绍","bbox":[x,y,width,height],"confidence":0.9}。bbox为0到1的左上宽高。'
-                + "\n上下文仅供辨认名字：" + json.dumps({"text": page.get("text"), "objects": page.get("objects", [])}, ensure_ascii=False))
+                + "\n上下文仅供辨认名字：" + json.dumps({"text": page.get("text"), "objects": source_names}, ensure_ascii=False))
             obj = await self.provider.vision(prompt, [image])
             bbox = normalize_bbox(obj.get("bbox"))
             contains = bbox and bbox[0] - 0.015 <= x <= bbox[0] + bbox[2] + 0.015 and bbox[1] - 0.015 <= y <= bbox[1] + bbox[3] + 0.015

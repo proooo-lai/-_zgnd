@@ -1,0 +1,62 @@
+{
+  "date": "2026-11-21",
+  "scope": "One authorized-page live generated clip and actual-frame interaction only; not whole-book acceptance",
+  "tests": {
+    "command": "python -m pytest -q",
+    "passed": 213,
+    "failures": 0,
+    "skipped": 0,
+    "dependency_warnings": 6
+  },
+  "environment": "macOS Apple Silicon, Python 3.12.14; current local environment/network",
+  "video": {
+    "provider": "minimax",
+    "model": "MiniMax-H3-Lite",
+    "submitted_tasks": 1,
+    "requested": {
+      "duration_seconds": 5,
+      "resolution": "768P",
+      "ratio": "16:9"
+    },
+    "observed": {
+      "duration_seconds": 5.167,
+      "width": 1344,
+      "height": 768,
+      "frame_rate": "24/1",
+      "codec": "h264"
+    },
+    "submission_poll_download": "succeeded",
+    "generation_and_download_seconds": 50.566,
+    "quality": {
+      "decision": "sampled_consistent",
+      "sampled_frames": 3,
+      "human_full_video_review": false
+    }
+  },
+  "interaction": {
+    "actual_frame_question_samples": 1,
+    "actual_frame_question_scope": "current_frame",
+    "model_evidence_review": "supported",
+    "fixed_object_touch_samples": 1,
+    "fixed_blank_touch_samples": 1,
+    "blank_touch_returned_no_boxes": true,
+    "source_geometry_excluded_from_touch_context": true,
+    "local_library_sample_labelled": true,
+    "media_http_status": 206
+  },
+  "timings_ms": {
+    "measurement": "single server-processing samples, not actual audible latency",
+    "actual_frame_question": 59023,
+    "fixed_object_touch": 9407,
+    "fixed_blank_touch": 7269
+  },
+  "not_validated": [
+    "Whole-book pipeline and generalization",
+    "Official metrics or final latency threshold",
+    "Actual audible latency",
+    "Paid task recovery and successful artifact reuse",
+    "Full-frame localization accuracy",
+    "Designated human factual and child-safety review"
+  ],
+  "restricted_media_annotations_transcripts_and_credentials_committed": false
+}

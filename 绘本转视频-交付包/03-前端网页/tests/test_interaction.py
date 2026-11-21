@@ -117,6 +117,20 @@ def test_generated_video_click_uses_actual_uploaded_frame_not_old_pdf_boxes(setu
     assert provider.calls[0]["first_pixel"][2] < 20
 
 
+def test_video_touch_context_keeps_names_but_excludes_source_geometry(setup):
+    store, settings = setup
+    book = make_book(store, generated=True)
+    book["pages"][0]["objects"][1]["geometry"] = {"polygon": [[.25, .5], [.45, .7]]}
+    store.save(book)
+    provider = ScriptedProvider([{"found": True, "label": "apple", "description": "It is red.",
+                                 "bbox": [.38, .45, .2, .25], "confidence": .95}], enabled=("vision",))
+    result = asyncio.run(Interactor(store, provider, settings).touch("synthetic", .46, .55, 12, "s1", encoded_frame()))
+    context = json.loads(provider.calls[0]["prompt"].rsplit("\n", 1)[1].split("：", 1)[1])
+    assert any(item.get("label") == "apple" and item.get("label_zh") == "苹果" for item in context["objects"])
+    assert all(set(item) <= {"label", "label_zh", "label_en"} for item in context["objects"])
+    assert result["boxes"][0]["bbox"] == [.38, .45, .2, .25]
+
+
 def test_low_confidence_visual_hit_is_never_marked_certain(setup):
     store, settings = setup
     make_book(store, generated=True)

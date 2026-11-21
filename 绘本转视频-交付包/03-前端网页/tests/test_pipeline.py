@@ -7,10 +7,11 @@ import pymupdf
 import pytest
 from PIL import Image, ImageDraw
 
-from storybook.pipeline import (assert_allowed_input, extract_pdf, merge_visual_page,
+from storybook.pipeline import (assert_allowed_input, extract_pdf, merge_visual_page, build_book, VisualPageResult,
                                 inspect_video_quality, prepare_video_reference, require_video_quality,
                                 synthesize_narration, validate_story, validate_video_quality)
 from storybook.providers import ProviderError
+from storybook.settings import Settings
 from storybook.schema import (contain_transform, normalize_bbox,
                               page_to_video_bbox, video_to_page_point)
 
@@ -21,6 +22,54 @@ def test_forbidden_directory_is_rejected_before_filesystem_resolution(monkeypatc
     monkeypatch.setattr(Path, "resolve", no_resolve)
     with pytest.raises(ValueError, match="禁止访问"):
         assert_allowed_input(Path("F:/AI+/参赛文件/测试集/never-open.pdf"))
+
+
+@pytest.mark.parametrize("kind", ["cover", "copyright", "story", "transition"])
+def test_visual_optional_null_title_is_an_empty_title_not_a_book_fact(kind):
+    result = VisualPageResult.model_validate({"text": "Original test text.", "description": "A drawing.",
+                                            "kind": kind, "title": None})
+    assert result.title == ""
+
+
+@pytest.mark.parametrize("title", [1, True, {}, []])
+def test_visual_optional_title_still_rejects_non_string_content(title):
+    with pytest.raises(ValueError):
+        VisualPageResult.model_validate({"text": "Original test text.", "description": "A drawing.", "title": title})
+
+
+def test_vision_page_failure_cancels_and_joins_sibling_requests(tmp_path):
+    document = pymupdf.open()
+    for _ in range(2):
+        document.new_page(width=160, height=90).insert_text((10, 20), "Original test page.")
+    source = tmp_path / "original.pdf"
+    document.save(source)
+    document.close()
+
+    async def scenario():
+        sibling_started = asyncio.Event()
+        sibling_stopped = asyncio.Event()
+
+        class Visual:
+            def available(self, name):
+                return name == "vision"
+
+            async def vision(self, prompt, images):
+                if images[0].stem == "0001":
+                    await sibling_started.wait()
+                    raise ProviderError("Original test failure")
+                sibling_started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    sibling_stopped.set()
+
+        settings = Settings(data_dir=tmp_path / "data", config_file=tmp_path / "absent.json", concurrency=2)
+        with pytest.raises(ProviderError, match="Original test failure"):
+            await build_book(source, tmp_path / "run", Visual(), settings)
+        assert sibling_stopped.is_set(), "A failed run must join pending page requests before returning"
+        events = json.loads((tmp_path / "run/agents/events.json").read_text())
+        assert all(event["agent"] != "Story" for event in events)
+    asyncio.run(scenario())
 
 
 def test_pdf_extraction_preserves_pages_words_and_official_objects(tmp_path):

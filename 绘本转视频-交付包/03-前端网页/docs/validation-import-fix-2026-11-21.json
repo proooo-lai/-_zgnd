@@ -1,0 +1,29 @@
+{
+  "date": "2026-11-21",
+  "scope": "Observed real import failure and offline regression fixes; real full-book run not resumed",
+  "tests": {
+    "command": "python -m pytest -q",
+    "passed": 222,
+    "failures": 0,
+    "skipped": 0,
+    "dependency_warnings": 6
+  },
+  "observed_failure": {
+    "optional_title_was_null": true,
+    "sibling_requests_continued_after_failure": true,
+    "completed_visual_page_outputs_preserved": 9,
+    "video_tasks_submitted_by_failed_import": 0
+  },
+  "changes": [
+    "Normalize only optional null title to empty string; retain strict other types",
+    "Cancel and join sibling page tasks before returning a failed or cancelled run",
+    "Leave prompts and existing successful cache identity unchanged"
+  ],
+  "original_failed_run_resumed": false,
+  "not_claimed": [
+    "Whole-book success",
+    "Cancellation of already accepted cloud billing",
+    "Paid generation recovery and successful artifact reuse"
+  ],
+  "restricted_data_and_credentials_committed": false
+}

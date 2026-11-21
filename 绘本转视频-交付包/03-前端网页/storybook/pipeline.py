@@ -20,7 +20,7 @@ from typing import Literal
 
 import pymupdf
 from PIL import Image, ImageOps
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .providers import ProviderError
 
@@ -220,6 +220,13 @@ class VisualPageResult(BaseModel):
     words: list[dict] = Field(default_factory=list)
     uncertainties: list[str] = Field(default_factory=list)
 
+    @field_validator("title", mode="before")
+    @classmethod
+    def optional_title(cls, value):
+        # A missing optional book title carries no story fact. Keep all other
+        # fields and non-null title values under the existing strict schema.
+        return "" if value is None else value
+
 
 def provider_identity(provider, settings, name):
     """Allowlisted identity; never retain keys, headers or account credentials."""
@@ -410,7 +417,17 @@ async def build_book(pdf_path: Path, book_dir: Path, provider, settings,
                          execution=result["_provenance"]["execution"], cache_key=result["_provenance"]["cache_key"])
             return enriched
     if provider.available("vision"):
-        pages = await asyncio.gather(*(understand(page) for page in pages))
+        understanding_tasks = [asyncio.create_task(understand(page)) for page in pages]
+        try:
+            pages = await asyncio.gather(*understanding_tasks)
+        except BaseException:
+            # Join siblings before the caller records a terminal run status.
+            # Already completed cache entries remain available for a later run.
+            for task in understanding_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*understanding_tasks, return_exceptions=True)
+            raise
     else:
         warnings.append("未配置视觉模型：仅保留 PDF 文本层和批注；扫描页、水印页、物体理解与触控识别尚不可用。")
         for page in pages:

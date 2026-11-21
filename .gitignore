@@ -1,0 +1,50 @@
+# Restricted competition material and sample-derived artifacts
+/参赛文件/
+/纸书智伴企业预选赛绘本素材/
+/评估记录/
+/绘本转视频-交付包/01-apiway/
+/绘本转视频-交付包/02-cloudway/
+/绘本转视频-交付包/04-skills/
+/绘本转视频-交付包/README.md
+# Secrets and local outputs
+.env
+.env.*
+config.local.json
+config.*.local.json
+*.key
+.minimax-key
+data/
+artifacts/
+output/
+uploads/
+logs/
+tools/bin/
+.local-books/
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+*.pdf
+*.docx
+*.wav
+*.mp3
+*.mp4
+*.mov
+*.webm
+*.png
+*.jpg
+*.jpeg
+*.srt
+*.zip
+# Original application icons drawn by icon/make_icon.py
+!/绘本转视频-交付包/03-前端网页/web/favicon.png
+!/绘本转视频-交付包/03-前端网页/icon/storybook.png
+
+# Local assessment and planning references
+/交付包评估与下一步开发方案_2026-11-21.md
+/纸书智伴_后续开发路线图.md

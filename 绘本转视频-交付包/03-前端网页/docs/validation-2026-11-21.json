@@ -1,0 +1,35 @@
+{
+  "date": "2026-11-21",
+  "scope": "S1 offline correctness and clean-environment startup; synthetic authorized fixtures only",
+  "python": "3.12.14",
+  "tests": {
+    "tests": 197,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "dependency_warnings": 6,
+  "javascript_syntax": "app.js and language.js passed",
+  "dependency_consistency": "pip check passed",
+  "startup": {
+    "startup": "passed",
+    "http_routes": 7,
+    "ffmpeg": true,
+    "ffprobe": true,
+    "real_api_called": false,
+    "model_configuration_present": {
+      "vision": false,
+      "chat": false,
+      "asr": false,
+      "tts": false,
+      "video": false
+    }
+  },
+  "not_validated": [
+    "live model APIs",
+    "actual audible latency",
+    "second authorized book full cold start",
+    "paid generation resume"
+  ],
+  "protected_data_and_secrets_in_submission": false
+}

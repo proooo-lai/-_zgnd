@@ -1,0 +1,12 @@
+config.local.json
+.env
+.env.*
+data/
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
+tools/bin/
+artifacts/
+logs/
+plugins/minimax-media/.minimax-key

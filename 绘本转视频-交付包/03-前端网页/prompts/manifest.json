@@ -1,0 +1,86 @@
+{
+  "version": "1.2.0",
+  "updated": "2026-11-21",
+  "note": "参考提示词；运行时代码是当前实现。问答必须在播报前通过独立证据复核；2秒仅为内部目标。",
+  "merge": {
+    "merged_tasks": [
+      "understand",
+      "story",
+      "answer",
+      "touch"
+    ],
+    "standalone_models": {
+      "video": "文生/图生视频模型（如 Seedance）",
+      "tts": "流式语音合成；话音结束到首音2秒为内部目标，官方延迟门槛待通知",
+      "asr": "16 kHz / 16 bit WAV 语音识别"
+    }
+  },
+  "prompts": [
+    {
+      "id": "understand",
+      "file": "understand.prompt.txt",
+      "title": "逐页图文理解",
+      "task_ref": "赛题任务① 内容理解；FAQ：VLM 可直接完成 OCR",
+      "variables": [
+        "page_number",
+        "native_text",
+        "page_hint",
+        "age_band"
+      ],
+      "output": "JSON: page_number/kind/title/text/description/objects[]/words[]/uncertainties[]"
+    },
+    {
+      "id": "story",
+      "file": "story.prompt.txt",
+      "title": "整书故事编排",
+      "task_ref": "赛题任务② 互动视频生成；FAQ：每页都要体现、允许合并镜头、风格一致",
+      "variables": [
+        "language",
+        "age_band",
+        "target_seconds",
+        "narration_budget",
+        "pages_json"
+      ],
+      "output": "JSON: title/summary/character_bible/scenes[]"
+    },
+    {
+      "id": "answer",
+      "file": "answer.prompt.txt",
+      "title": "语音问答与视频内检索",
+      "task_ref": "赛题任务③ 实时交互；FAQ：跨语言问答、跳帧框选、描述指定帧",
+      "variables": [
+        "question",
+        "answer_language",
+        "current_page",
+        "current_time",
+        "pages_json"
+      ],
+      "output": "JSON: answer/evidence_scope/evidence_pages[]/seek_page/target_label/target_kind/uncertain"
+    },
+    {
+      "id": "touch",
+      "file": "touch.prompt.txt",
+      "title": "触控对象识别与讲解",
+      "task_ref": "赛题任务③ 触控式万物识别；FAQ：独立语义对象级、点击即暂停并讲解",
+      "variables": [
+        "click_x",
+        "click_y",
+        "current_page",
+        "answer_language",
+        "objects_json"
+      ],
+      "output": "JSON: matched/object/nearest[]/introduction/uncertain"
+    },
+    {
+      "id": "merged",
+      "file": "merged.system.prompt.txt",
+      "title": "四任务合并系统提示（单模型路由）",
+      "task_ref": "任务①②③ 合并；运行时按 task 字段路由",
+      "variables": [
+        "task",
+        "task_payload"
+      ],
+      "output": "按 task 返回对应 JSON"
+    }
+  ]
+}

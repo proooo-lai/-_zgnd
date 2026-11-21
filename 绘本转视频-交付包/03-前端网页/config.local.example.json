@@ -1,0 +1,43 @@
+{
+  "providers": {
+    "vision": {
+      "kind": "openai",
+      "base_url": "https://api.teamggb.com/v1",
+      "model": "gpt-5.6-sol",
+      "api_key": "env:BOOK_VISION_API_KEY"
+    },
+    "chat": {
+      "kind": "openai",
+      "base_url": "https://api.deepseek.com/v1",
+      "model": "deepseek-flash",
+      "api_key": "env:BOOK_CHAT_API_KEY"
+    },
+    "asr": {
+      "kind": "dashscope",
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "model": "qwen3-asr-flash",
+      "api_key": "env:BOOK_ASR_API_KEY"
+    },
+    "tts": {
+      "kind": "dashscope",
+      "base_url": "https://dashscope.aliyuncs.com/api/v1",
+      "model": "qwen3-tts-flash",
+      "voice": "Cherry",
+      "api_key": "env:BOOK_TTS_API_KEY"
+    },
+    "video": {
+      "kind": "minimax",
+      "base_url": "https://api.minimax.cn",
+      "model": "MiniMax-H3-Lite",
+      "api_key": "env:BOOK_VIDEO_API_KEY"
+    }
+  },
+  "runtime": {
+    "concurrency": 4,
+    "max_pages": 100,
+    "target_duration": 120,
+    "width": 1280,
+    "height": 720,
+    "fps": 24
+  }
+}

@@ -287,7 +287,7 @@ def create_app(settings=None, provider=None):
     async def touch(book_id: str, body: Touch):
         return await interactor.touch(book_id, body.x, body.y, body.time, body.session_id, body.frame, body.voice)
 
-    async def process_voice(book_id, audio, session_id, time, emit=None):
+    async def process_voice(book_id, audio, session_id, time, emit=None, frame=None, voice=None):
         store.book(book_id)
         store.identifier(session_id)
         if not math.isfinite(time) or time < 0 or time > 100000:
@@ -320,7 +320,8 @@ def create_app(settings=None, provider=None):
             raise
         asr_ms = round((__import__("time").perf_counter() - started) * 1000)
         try:
-            result = await interactor.ask(book_id, transcript, session_id, time, turn_id=turn_id, input_kind="voice", emit=emit)
+            result = await interactor.ask(book_id, transcript, session_id, time, frame=frame,
+                                          turn_id=turn_id, input_kind="voice", emit=emit, voice=voice)
         except BaseException:
             # A failed turn may already have emitted speech. Its partial history
             # owns the input and emitted prefix, even though it is not successful.
@@ -339,11 +340,13 @@ def create_app(settings=None, provider=None):
         return result
 
     @app.post("/api/books/{book_id}/voice")
-    async def voice(book_id: str, audio: UploadFile = File(...), session_id: str = Form("default"), time: float = Form(0)):
-        return await process_voice(book_id, audio, session_id, time)
+    async def voice(book_id: str, audio: UploadFile = File(...), session_id: str = Form("default"), time: float = Form(0),
+                    frame: str | None = Form(None, max_length=8_000_000), voice: str | None = Form(None, max_length=80)):
+        return await process_voice(book_id, audio, session_id, time, frame=frame, voice=voice)
 
     @app.post("/api/books/{book_id}/voice/stream")
-    async def voice_stream(book_id: str, audio: UploadFile = File(...), session_id: str = Form("default"), time: float = Form(0)):
+    async def voice_stream(book_id: str, audio: UploadFile = File(...), session_id: str = Form("default"), time: float = Form(0),
+                           frame: str | None = Form(None, max_length=8_000_000), voice: str | None = Form(None, max_length=80)):
         store.book(book_id)
         if not provider.available("asr"):
             raise HTTPException(409, "请先在本机设置中配置语音识别服务")
@@ -354,7 +357,7 @@ def create_app(settings=None, provider=None):
         if len(contents) > 20 * 1024 * 1024:
             raise ValueError("音频不得超过 20MB")
         copied = UploadFile(file=io.BytesIO(contents), filename=audio.filename)
-        return stream_response(lambda emit: process_voice(book_id, copied, session_id, time, emit))
+        return stream_response(lambda emit: process_voice(book_id, copied, session_id, time, emit, frame, voice))
 
     @app.delete("/api/books/{book_id}")
     async def delete_book(book_id: str):

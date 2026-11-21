@@ -62,6 +62,25 @@ def rank_pages(pages, question, current_page=None):
     return [page for _, page in sorted(scored, key=lambda item: item[0], reverse=True)]
 
 
+def selected_object(prior, current_page):
+    """Latest click in this scene supplies names for reference, never facts."""
+    for turn in reversed(prior):
+        if turn.get("input_kind") != "touch":
+            continue
+        obj = turn.get("object")
+        evidence = turn.get("evidence") or []
+        page = turn.get("interaction_page", evidence[0].get("page_number") if evidence else None)
+        # An unsuccessful click clears focus; do not revive an older object.
+        if (not isinstance(obj, dict) or turn.get("uncertain")
+                or (turn.get("success") is False and turn.get("status") != "partial_audio")
+                or page != current_page):
+            return None
+        names = {key: obj[key][:120] for key in ("id", "label", "label_zh", "label_en")
+                 if isinstance(obj.get(key), str) and obj[key].strip()}
+        return {**names, "page_number": page, "turn_id": turn.get("turn_id")} if names.get("label") else None
+    return None
+
+
 def scene_at(book, timestamp):
     scenes = book.get("scenes", [])
     for scene in scenes:
@@ -186,8 +205,8 @@ class Interactor:
             if not page:
                 continue
             scene = scene_for_page(book, number)
-            result.append({"page_number": number, "start": scene["start"] if scene else 0,
-                           "end": scene["end"] if scene else 0,
+            result.append({"page_number": number, "start": scene["start"] if scene else None,
+                           "end": scene["end"] if scene else None,
                            "quote": page.get("text", "")[:500], "description": page.get("description", "")[:500],
                            "image_url": page["image_url"]})
         return result
@@ -197,6 +216,9 @@ class Interactor:
         if safety_check(answer)["blocked"]:
             answer = "这个内容不适合小朋友。我们可以一起聊聊绘本中的故事。"
             result.update(uncertain=True, safety_blocked=True)
+            result.pop("story_context", None)
+        elif result.get("story_context"):
+            result["story_context"]["answer"] = redact_privacy(result["story_context"]["answer"])
         result.update(answer=answer, turn_id=turn_id, input_kind=input_kind)
         result.setdefault("boxes", [])
         result.setdefault("evidence", [])
@@ -283,9 +305,16 @@ class Interactor:
         scene = scene_at(book, timestamp)
         current = scene["page_number"] if scene else None
         prior = self.store.history(book_id, session_id, limit=12)
+        selected = selected_object(prior, current)
+        refers_to_selection = bool(selected and re.search(
+            r"他|她|它|这[个只位些]|那[个只位些]|刚才|\b(?:it|its|he|his|him|she|her|they|their|them|that|this)\b", question, re.I))
         if safety_check(question)["blocked"]:
             return await self._finish(book, session_id, question, {"answer": "这个问题涉及危险内容。我们可以聊聊故事中的角色和安全的做法。", "uncertain": True}, started, turn_id, folder, input_kind)
-        ranked = rank_pages(book["pages"], question + " " + " ".join(t.get("question", "") for t in prior[-2:]), current)
+        story_followup = bool(refers_to_selection and re.search(
+            r"干什么|做什么|怎么了|为什么|doing|happened|why", question, re.I)
+            and not re.search(r"故事|书里|绘本|story|book|只.{0,8}画面|only.{0,20}(?:frame|picture|action)", question, re.I))
+        reference_names = " ".join(selected.get(key, "") for key in ("label", "label_zh", "label_en")) if refers_to_selection else ""
+        ranked = rank_pages(book["pages"], question + " " + reference_names + " " + " ".join(t.get("question", "") for t in prior[-2:]), current)
         # 相关页给全文，其余页只留摘要：既保住整书可见，又不把上下文撑到几千 token（直接影响首音延迟）。
         hot = {p["number"] for p in ranked[:3]}
         outlines = []
@@ -304,9 +333,24 @@ class Interactor:
                    "不要重复问题，不要用反问、教学提问或让孩子自己找答案来替代作答。"
                    "若证据不足，直接说明无法确定，不得编造。只有用户明确要求找、跳转、定位、框选时才设置seek_page和target_label；普通事实问答不要自动跳转。")
         prompt += "不要声称看到了画面中没有的对象；不把叙事补充当作原文事实。检索对象或原画面文字（非字幕）时给出目标页。"
+        prompt += ("\nselected_object是最近可靠点选的对象，仅供消解‘他/它/这个’等指代；明确点名其他角色的问题以新问题为准。"
+                   "对象介绍和历史回答不是故事证据。对点选后的动作、原因或关系追问，检索该角色在整本书中的情节，"
+                   "回答应说明可核对的故事动作/关系，不能只重复外貌或百科介绍。"
+                   "若同时涉及眼前动作和故事背景，先说当前帧可见动作，再明确用‘故事里’连接有原文支持的情节；"
+                   "其他页的动作不能说成正在当前画面发生。只问故事情节时使用book；断言当前帧时使用current_frame。"
+                   "关联不确定就明确说明，指代不清就请用户点选或说明角色，不得把其他角色的经历套给它。")
         prompt += '\n只返回JSON: {"answer":"回答", "evidence_scope":"book或current_frame", "evidence_pages":[1], "seek_page":null, "target_label":"需框选的对象或单词，没有则空串", "target_kind":"object|word|none", "uncertain":false}。不够确定时uncertain=true，不要猜答案或页码。'
         prompt += "evidence_scope必须明确：原书事实为book；当前视频/屏幕/正在展示对象的问题为current_frame，不能用原书描述冒充实际画面。"
+        if story_followup:
+            prompt += ('本轮为点选后的故事关联追问。answer只写直接动作回答；必须另给story_context：'
+                       '{"answer":"该对象在原书中的相关情节或角色关系，不含故事里前缀",'
+                       '"evidence_pages":[实际支持情节的页码],"uncertain":false}。'
+                       '服务端会把两部分合并后复核。不要只返回外貌、动作描述或百科介绍。'
+                       '原书情节与当前帧不同的，清楚表达为背景，不能说成正在发生。'
+                       '若找不到可靠关联，story_context.answer为空、evidence_pages为空且uncertain=true，不编造。')
         prompt += "\n" + json.dumps({"book_title": book["title"], "question": question, "current_page": current, "current_time": timestamp,
+            "selected_object": selected,
+            "story_followup": story_followup,
             "prior_turns": [{"question": t.get("question"), "answer": t.get("answer"), "answer_partial": t.get("answer_partial"), "status": t.get("status", "completed"), "object": t.get("object"), "evidence": t.get("evidence")} for t in prior],
             "priority_pages": [p["number"] for p in ranked[:8]], "book_evidence": outlines}, ensure_ascii=False)
         answer_language = response_language(question)
@@ -316,7 +360,7 @@ class Interactor:
         requires_frame = bool(re.search(
             r"(?:当前|现在|正在播放).{0,6}(?:画面|帧|视频)|这(?:一?帧|[张幅]图|[段个]视频)|(?:画面|视频|屏幕)[中里上内]|"
             r"\b(?:current|this)\s+(?:video|frame|picture|image|screen)\b|\bon (?:the|my) screen\b", question, re.I))
-        visual_question = visual_question or requires_frame
+        visual_question = visual_question or requires_frame or refers_to_selection
         # A streamed draft is untrusted until all references and claims pass.
         context_token = ANSWER_CALLBACK.set(None)
         try:
@@ -324,7 +368,8 @@ class Interactor:
             if not requires_frame or self.provider.available("vision"):
                 model = await self._answer_model(book, scene, timestamp, folder, frame, ranked, prompt, question, visual_question)
             model = await self._validate_answer(book, model, question, folder, visual_question, requires_frame,
-                {"current_page": current, "current_time": timestamp,
+                {"current_page": current, "current_time": timestamp, "selected_object": selected,
+                 "story_followup": story_followup,
                  "prior_turns_for_reference_only": [{"question": t.get("question"), "answer": t.get("answer"),
                      "status": t.get("status")} for t in prior[-2:]]})
             delivery["evidence_validation"] = model["_validation"]
@@ -364,6 +409,8 @@ class Interactor:
                   "evidence": self._evidence(book, valid_numbers), "uncertain": bool(model.get("uncertain", False)) or not valid_numbers or len(valid_numbers) != len(numbers), "boxes": []}
         result["evidence_validation"] = model["_validation"]
         result["evidence_scope"] = model["evidence_scope"]
+        if model.get("story_context"):
+            result["story_context"] = model["story_context"]
         if model["_validation"]["decision"] != "supported":
             result.update(status="insufficient_evidence", success=False)
         seek_page = model.get("seek_page")
@@ -397,6 +444,9 @@ class Interactor:
             elif reason == "current_frame_cannot_be_verified":
                 answer = ("I cannot verify the current video frame. Please check the vision service and frame capture." if language == "en"
                           else "目前无法核对当前视频帧，请检查视觉服务配置和画面截取。")
+            elif reason == "verifier_unavailable_or_invalid":
+                answer = ("The answer review service could not complete this turn. Please try again later." if language == "en"
+                          else "本轮答案复核服务未能完成，暂时不能确认回答，请稍后重试。")
             return {"answer": answer, "evidence_pages": [], "uncertain": True,
                     "evidence_scope": "current_frame" if reason == "current_frame_cannot_be_verified" else "book",
                     "_validation": {"decision": "rejected", "reason": reason, "version": VERIFIER_VERSION}}
@@ -407,6 +457,23 @@ class Interactor:
             draft = AnswerDraft.model_validate(raw)
         except ValidationError:
             return refuse("invalid_answer_schema")
+        needs_story = bool(context and context.get("story_followup"))
+        if needs_story:
+            story = draft.story_context
+            if story is None:
+                return refuse("missing_story_context")
+            if (story.uncertain or not story.answer.strip() or not story.evidence_pages
+                    or any(not page_by_number(book, n) for n in story.evidence_pages)):
+                return refuse("story_context_unconfirmed")
+            detail = story.answer.strip()
+            if not detail.startswith(("故事里", "故事中")) and not detail.lower().startswith("in the story"):
+                detail = ("In the story, " if language == "en" else "故事里，") + detail
+            try:
+                draft = AnswerDraft.model_validate({**draft.model_dump(),
+                    "answer": draft.answer.rstrip() + (" " if language == "en" else "") + detail,
+                    "evidence_pages": list(dict.fromkeys(draft.evidence_pages + story.evidence_pages))})
+            except ValidationError:
+                return refuse("invalid_answer_schema")
         requires_frame = requires_frame or draft.evidence_scope == "current_frame"
         frame_available = self.provider.available("vision") and (folder / "frame.jpg").is_file()
         if requires_frame and not frame_available:
@@ -426,6 +493,8 @@ class Interactor:
                   "允许准确翻译、跨页概括和指代解释，不用字面关键词重合替代语义核对。"
                   "必须独立判断证据作用域evidence_scope：原书为book，当前视频/屏幕/指向正在展示的对象为current_frame。"
                   "历史问题和回答只用于理解代词/时间关系，绝不能作为绘本事实证据。当前页和时间是消歧上下文。"
+                  "selected_object也仅用于确定点选对象的名字。追问动作、原因或故事关系时，只有外貌/百科介绍不算回答问题；"
+                  "可核对的故事关联应予保留。跨页情节必须明确是故事背景，不能冒充当前帧正在发生的动作。"
                   "原文与视觉描述的来源不同；生成旁白和先前模型回答不是独立证据。存在矛盾或证据不充分时uncertain=true。"
                   "若附带视频帧，当前画面相关的断言必须与实际帧一致，不能把原页当成当前帧。"
                   '只返回JSON {"supported":true,"evidence_scope":"book或current_frame","uncertain":false,"evidence_pages":[1],"reason":"具体证据或不足原因"}。'
@@ -455,8 +524,12 @@ class Interactor:
         if (not verdict.supported or verdict.uncertain or not verdict.evidence_pages
                 or not set(verdict.evidence_pages).issubset(numbers)):
             return refuse("evidence_does_not_support_answer")
+        if needs_story and not set(draft.story_context.evidence_pages).issubset(verdict.evidence_pages):
+            return refuse("story_context_not_verified")
         # Seeking a page is also a claim and must remain within accepted evidence.
         result = draft.model_dump()
+        if not needs_story:
+            result["story_context"] = None
         result["evidence_scope"] = verdict.evidence_scope
         result["evidence_pages"] = list(dict.fromkeys(verdict.evidence_pages))
         if result["seek_page"] not in result["evidence_pages"]:
@@ -514,10 +587,32 @@ class Interactor:
                 for item in answer.get("boxes", []) if isinstance(item, dict) and (box := normalize_bbox(item.get("bbox")))]
 
     async def touch(self, book_id, x, y, timestamp, session_id, frame=None, voice=None):
+        book = self.store.book(book_id)
+        self.store.identifier(session_id)
+        turn_id = uuid.uuid4().hex
+        try:
+            return await self._touch(book_id, x, y, timestamp, session_id, frame, voice, turn_id=turn_id)
+        except BaseException:
+            # A failed new click must clear the preceding focus. Keep this
+            # separate from audio delivery failure after reliable recognition.
+            if not any(t.get("turn_id") == turn_id for t in self.store.history(book_id, session_id)):
+                scene = scene_at(book, timestamp)
+                failed = {"turn_id": turn_id, "input_kind": "touch", "status": "failed",
+                          "success": False, "uncertain": True, "answer": "", "boxes": [], "evidence": [],
+                          "question": f"点击视频 {timestamp:.2f}s 的位置 ({x:.3f},{y:.3f})",
+                          "interaction_page": scene["page_number"] if scene else None,
+                          "interaction_time": timestamp, "created_at": time.time(),
+                          "error": "本轮点选识别未完成，请重新点选对象。"}
+                frame_path = self.store.directory(book_id) / "turns" / turn_id / "frame.jpg"
+                if frame_path.is_file():
+                    failed["frame_url"] = f"/media/{book_id}/turns/{turn_id}/frame.jpg"
+                self.store.append(book_id, session_id, failed)
+            raise
+
+    async def _touch(self, book_id, x, y, timestamp, session_id, frame=None, voice=None, *, turn_id):
         ANSWER_VOICE.set(voice)
         started = time.perf_counter()
         book = self.store.book(book_id)
-        turn_id = uuid.uuid4().hex
         folder = self.store.directory(book_id) / "turns" / turn_id
         folder.mkdir(parents=True, exist_ok=True)
         scene = scene_at(book, timestamp)
@@ -527,7 +622,8 @@ class Interactor:
         transform = scene.get("transform", {})
         match = None
         result = {"answer": "这个位置没有足够清晰的可识别对象，请点一下画面中的人物或物品。", "uncertain": True,
-                  "boxes": [], "evidence": self._evidence(book, [page["number"]])}
+                  "boxes": [], "evidence": self._evidence(book, [page["number"]]),
+                  "interaction_page": page["number"], "interaction_time": timestamp}
         if transform.get("kind") == "contain":
             point = video_to_page_point(x, y, transform)
             if point is None:

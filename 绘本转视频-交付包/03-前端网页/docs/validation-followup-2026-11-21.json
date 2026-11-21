@@ -1,0 +1,40 @@
+{
+  "date": "2026-11-21",
+  "scope": "Selected-object reference, story-grounded followups, voice frame and voice-choice forwarding; development checks only",
+  "automated": {
+    "command": ".venv/bin/python -m pytest -q",
+    "passed": 238,
+    "failed": 0,
+    "skipped": 0,
+    "dependency_warnings": 6,
+    "javascript_syntax": "node --check web/app.js",
+    "diff_whitespace": "git diff --check"
+  },
+  "live_checks": {
+    "data": "One authorized Chinese PDF, all 12 source pages understood; existing single-page video retained",
+    "video_regeneration": false,
+    "selected_object": "recognized",
+    "explicit_story_voice": "ASR, evidence review and answer audio completed",
+    "structured_text_followup": {"status": "review_service_failed_refused", "elapsed_ms": 236521},
+    "structured_voice_followup": {
+      "status": "supported_current_action_and_story_context",
+      "elapsed_ms": 228016,
+      "evidence_page_count": 2,
+      "answer_audio_complete": true,
+      "input": "Synthesized development question, not actual microphone"
+    },
+    "actual_browser_microphone_and_speaker": "not_verified_browser_control_unavailable",
+    "web_timeout_ms": 180000,
+    "web_realtime_usable": false,
+    "same_service_short_reasoning_probe": "HTTP_400_not_applied",
+    "model_switch": "awaiting_user_preference_original_configuration_preserved"
+  },
+  "limitations": [
+    "Voice service success does not prove real microphone recording or speaker playback",
+    "Current vision service latency exceeds the web wait limit",
+    "Whole-book evidence update does not complete whole-book video generation",
+    "Automatic evidence review is not independent human review",
+    "No official evaluation, latency percentile or generalization result is claimed"
+  ],
+  "restricted_data": "Source files, images, OCR, annotations, model outputs, transcripts and audio remain in ignored local directories"
+}

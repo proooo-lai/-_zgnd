@@ -4,6 +4,13 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class StoryContext(BaseModel):
+    model_config = ConfigDict(strict=True)
+    answer: str = Field(max_length=1500)
+    evidence_pages: list[int] = Field(max_length=100)
+    uncertain: bool = False
+
+
 class AnswerDraft(BaseModel):
     model_config = ConfigDict(strict=True)
     answer: str = Field(min_length=1, max_length=5000)
@@ -14,6 +21,7 @@ class AnswerDraft(BaseModel):
     seek_page: int | None = None
     target_label: str = Field(default="", max_length=120)
     target_kind: Literal["object", "word", "none"] = "none"
+    story_context: StoryContext | None = None
 
 
 class EvidenceVerdict(BaseModel):

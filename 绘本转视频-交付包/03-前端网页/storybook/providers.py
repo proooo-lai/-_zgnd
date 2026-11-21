@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import quote, urljoin, urlsplit
 
 import httpx
+from PIL import Image
 
 from .settings import validate_service_url
 
@@ -454,6 +455,7 @@ class Provider:
         if len(response.content) < 44 or response.content[:4] not in (b"RIFF", b"RF64") or response.content[8:12] != b"WAVE":
             raise ProviderError("语音接口未返回请求的 WAV 音频，请检查接口类型和 response_format 支持")
         wav.write_bytes(response.content)
+        self._verify_wav(wav)
         return wav
 
     async def tts_stream(self, text: str, language: str, out: Path, on_pcm, voice: str | None = None) -> Path:
@@ -554,11 +556,51 @@ class Provider:
 
     @staticmethod
     def _verify_wav(path: Path):
-        with path.open("rb") as stream:
-            header = stream.read(44)
-        if len(header) < 44 or header[:4] not in (b"RIFF", b"RF64") or header[8:12] != b"WAVE":
+        """Finalize known streaming RIFF lengths without changing audio samples."""
+        try:
+            with path.open("rb") as stream:
+                header = stream.read(44)
+                if len(header) < 44 or header[:4] not in (b"RIFF", b"RF64") or header[8:12] != b"WAVE":
+                    raise ValueError
+                # RF64 uses ds64 sizes; retain its existing header check rather
+                # than interpreting its 64-bit lengths as a PCM RIFF file.
+                if header[:4] == b"RF64":
+                    return
+                file_size = path.stat().st_size
+                riff_size = int.from_bytes(header[4:8], "little")
+                offset = 12
+                while offset + 8 <= file_size:
+                    stream.seek(offset)
+                    chunk = stream.read(8)
+                    data_size = int.from_bytes(chunk[4:8], "little")
+                    if chunk[:4] == b"data":
+                        data_start = offset + 8
+                        break
+                    offset += 8 + data_size + data_size % 2
+                else:
+                    raise ValueError
+            # DashScope may return an EOF-terminated WAV with these size
+            # placeholders. Ordinary truncation must never be repaired as if
+            # the missing audio had arrived successfully.
+            streaming = (riff_size, data_size) in {
+                (0x7FFFFFBF, 0x7FFFFF9B), (0xFFFFFFFF, 0xFFFFFFFF)}
+            if not streaming and riff_size != file_size - 8:
+                raise ValueError
+            with wave.open(str(path), "rb") as audio:
+                frame_bytes = audio.getnchannels() * audio.getsampwidth()
+            actual_size = file_size - data_start if streaming else data_size
+            if (actual_size <= 0 or actual_size % frame_bytes
+                    or data_start + actual_size > file_size):
+                raise ValueError
+            if streaming:
+                with path.open("r+b") as stream:
+                    stream.seek(4)
+                    stream.write((file_size - 8).to_bytes(4, "little"))
+                    stream.seek(data_start - 4)
+                    stream.write(actual_size.to_bytes(4, "little"))
+        except (OSError, EOFError, ValueError, RuntimeError, wave.Error):
             path.unlink(missing_ok=True)
-            raise ProviderError("语音服务产物不是有效 WAV 音频")
+            raise ProviderError("语音服务产物不是完整有效的 WAV 音频") from None
 
     @staticmethod
     @lru_cache(maxsize=1)
@@ -657,22 +699,31 @@ try {
         """MiniMax H3（Hailuo-03）图生视频。
 
         提交 POST {base}/v2/video_generation，轮询 GET {base}/v2/query/video_generation/{task_id}。
-        画面以首帧图 + role=first_frame 传入，比例自适应原图。
+        画面以首帧图 + role=first_frame 传入；Lite 使用最接近原图的显式比例。
         """
         base = config["base_url"].rstrip("/")
         model = config["model"]
         seconds = max(4, min(15, int(duration)))
         resolution = "2K" if model == "MiniMax-H3" else "768P"
+        ratio = "adaptive"
+        if model == "MiniMax-H3-Lite":
+            # V2 Lite rejects adaptive; pipeline references already include
+            # page-preserving padding, so choose their closest supported ratio.
+            with Image.open(image) as reference:
+                aspect = reference.width / reference.height
+            supported = {"21:9": 21 / 9, "16:9": 16 / 9, "4:3": 4 / 3,
+                         "1:1": 1, "3:4": 3 / 4, "9:16": 9 / 16}
+            ratio = min(supported, key=lambda value: abs(aspect - supported[value]))
         payload = {"model": model, "content": [
             {"type": "text", "text": prompt},
             {"type": "image_url", "image_url": {"url": data_url(image)}, "role": "first_frame"}],
-            "resolution": resolution, "duration": seconds, "ratio": "adaptive"}
+            "resolution": resolution, "duration": seconds, "ratio": ratio}
         out = Path(out)
         out.parent.mkdir(parents=True, exist_ok=True)
         provenance_path = out.with_suffix(".task.json")
         provenance = {"task_id": None, "status": "submitting", "model": model, "prompt": prompt,
                       "source_sha256": hashlib.sha256(Path(image).read_bytes()).hexdigest(),
-                      "parameters": {"resolution": resolution, "duration": seconds, "ratio": "adaptive"},
+                      "parameters": {"resolution": resolution, "duration": seconds, "ratio": ratio},
                       "started_at": time.time()}
         provenance_path.write_text(json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8")
         try:

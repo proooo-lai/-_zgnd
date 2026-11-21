@@ -1,0 +1,40 @@
+{
+  "date": "2026-11-21",
+  "scope": "Live service samples and WAV/MiniMax parameter compatibility regressions; no whole-book claim",
+  "environment": "macOS Apple Silicon, Python 3.12.14; local environment and current network only",
+  "tests": {"command": "python -m pytest -q", "passed": 212, "failures": 0, "skipped": 0, "dependency_warnings": 6},
+  "live_samples": {
+    "authorized_chinese_pdf_pages_extracted": 12,
+    "chinese_pages_sent_to_vision": 3,
+    "vision_json_schema_valid": 3,
+    "english_text_extraction_and_summary_pages": 1,
+    "narration_scenes_with_page_coverage_validated": 3,
+    "evidence_questions_with_supported_answers": 2,
+    "insufficient_evidence_questions_refused": 1,
+    "synthetic_voice_to_asr_to_evidence_answer_to_tts": "passed",
+    "downloaded_wav_files_repaired_with_identical_pcm": 3,
+    "fresh_live_tts_question_and_answer_have_consistent_wav_lengths": true,
+    "actual_microphone_tested": false,
+    "video_service_called": false,
+    "hidden_queries_or_answers_accessed": false
+  },
+  "timings_ms": {
+    "measurement": "Single live samples, not audible latency or P50/P95",
+    "vision_pages": [62183, 95050, 83355],
+    "evidence_qa_server_total": [6102, 39329],
+    "refusal_server_total": 2601,
+    "voice_roundtrip_asr": 324,
+    "voice_roundtrip_qa_server_total": 5936
+  },
+  "offline_only": ["MiniMax explicit ratio payload and task trace consistency"],
+  "not_validated": [
+    "Full-book understanding or second-book complete pipeline",
+    "Official accuracy, retrieval and evidence metrics",
+    "Actual audible latency",
+    "Video account permissions, billing, generation and polling",
+    "Actual generated-frame touch interaction",
+    "Paid task recovery and successful artifact reuse",
+    "Designated human factual and child-safety review"
+  ],
+  "restricted_pages_transcripts_annotations_media_and_credentials_committed": false
+}

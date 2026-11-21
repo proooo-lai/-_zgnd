@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import struct
+import wave
 
 import httpx
 import pytest
+from PIL import Image
 
 from storybook.providers import Provider, ProviderError, dashscope_audio_url
 from storybook.settings import Settings, validate_service_url
@@ -18,6 +22,89 @@ def config(kind="openai"):
     return {"kind": kind, "base_url": "https://models.example/v1", "model": "test-model", "api_key": "private-key-never-echo"}
 
 
+def pcm_wav():
+    output = io.BytesIO()
+    with wave.open(output, "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(24000)
+        audio.writeframes(b"\x01\x00" * 240)
+    return output.getvalue()
+
+
+@pytest.mark.parametrize("kind", ["dashscope", "openai"])
+@pytest.mark.parametrize("sizes", [(0x7FFFFFBF, 0x7FFFFF9B), (0xFFFFFFFF, 0xFFFFFFFF)])
+def test_tts_finalizes_streaming_wav_lengths_without_changing_pcm(tmp_path, kind, sizes):
+    async def scenario():
+        payload = bytearray(pcm_wav())
+        struct.pack_into("<I", payload, 4, sizes[0])
+        struct.pack_into("<I", payload, 40, sizes[1])
+
+        def respond(request):
+            if request.method == "POST" and kind == "dashscope":
+                return httpx.Response(200, json={"output": {"audio": {"url": "https://audio.example/speech.wav"}}})
+            return httpx.Response(200, content=bytes(payload))
+
+        provider = Provider(settings(tmp_path, tts=config(kind)))
+        await provider.client.aclose()
+        provider.client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        try:
+            target = await provider.tts("An original test sentence.", "en", tmp_path / "speech.wav")
+            with wave.open(str(target), "rb") as audio:
+                assert audio.getnframes() == 240
+                assert audio.getframerate() == 24000
+                assert audio.readframes(240) == b"\x01\x00" * 240
+            assert struct.unpack_from("<I", target.read_bytes(), 4)[0] == target.stat().st_size - 8
+        finally:
+            await provider.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("payload", [
+    pcm_wav()[:-2],
+    pcm_wav()[:44],
+    b"RIFF" + bytes(4) + b"WAVE" + bytes(40),
+    b"RIFF\x0c\x00\x00\x00WAVEJUNK\x08\x00\x00\x00" + bytes(8) + pcm_wav()[12:],
+])
+def test_tts_rejects_truncated_or_malformed_wav(tmp_path, payload):
+    target = tmp_path / "invalid.wav"
+    target.write_bytes(payload)
+    with pytest.raises(ProviderError, match="WAV"):
+        Provider._verify_wav(target)
+    assert not target.exists()
+
+
+def test_tts_preserves_complete_wav_bytes(tmp_path):
+    target = tmp_path / "complete.wav"
+    original = pcm_wav()
+    target.write_bytes(original)
+    Provider._verify_wav(target)
+    assert target.read_bytes() == original
+
+
+def test_tts_rejects_streaming_wav_with_incomplete_sample(tmp_path):
+    payload = bytearray(pcm_wav()[:-1])
+    struct.pack_into("<I", payload, 4, 0x7FFFFFBF)
+    struct.pack_into("<I", payload, 40, 0x7FFFFF9B)
+    target = tmp_path / "incomplete.wav"
+    target.write_bytes(payload)
+    with pytest.raises(ProviderError, match="WAV"):
+        Provider._verify_wav(target)
+    assert not target.exists()
+
+
+def test_tts_accepts_wav_with_padded_metadata_before_audio(tmp_path):
+    payload = bytearray(pcm_wav()[:12] + b"JUNK\x01\x00\x00\x00x\x00" + pcm_wav()[12:])
+    struct.pack_into("<I", payload, 4, len(payload) - 8)
+    target = tmp_path / "metadata.wav"
+    target.write_bytes(payload)
+    Provider._verify_wav(target)
+    with wave.open(str(target), "rb") as audio:
+        assert audio.getnframes() == 240
+        assert audio.readframes(240) == b"\x01\x00" * 240
+    assert target.read_bytes() == bytes(payload)
+
+
 def test_dashscope_signed_audio_url_upgrades_tls_without_changing_signature():
     url = "http://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/audio.wav?Signature=a%2Bb%3D&Expires=123"
     assert dashscope_audio_url(url) == "https" + url[4:]
@@ -28,18 +115,18 @@ def test_dashscope_signed_audio_url_upgrades_tls_without_changing_signature():
 def test_dashscope_tts_downloads_signed_audio_over_https(tmp_path):
     async def scenario():
         calls = []
-        wave = b"RIFF" + bytes(4) + b"WAVE" + bytes(40)
+        audio_bytes = pcm_wav()
         def respond(request):
             calls.append(request)
             if request.method == "POST":
                 return httpx.Response(200, json={"output": {"audio": {"url": "http://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/a.wav?Signature=a%2Bb"}}})
-            return httpx.Response(200, content=wave)
+            return httpx.Response(200, content=audio_bytes)
         provider = Provider(settings(tmp_path, tts=config("dashscope")))
         await provider.client.aclose()
         provider.client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
         try:
             target = await provider.tts("你好", "zh", tmp_path / "speech.wav")
-            assert target.read_bytes() == wave
+            assert target.read_bytes() == audio_bytes
             assert calls[1].url.scheme == "https"
             assert calls[1].url.query == b"Signature=a%2Bb"
             assert "authorization" not in calls[1].headers
@@ -111,6 +198,38 @@ def test_post_timeout_is_not_retried_and_task_trace_records_unknown(tmp_path):
             assert "private-key-never-echo" not in str(error.value)
             trace = json.loads(output.with_suffix(".task.json").read_text(encoding="utf-8"))
             assert trace["status"] == "submission_unconfirmed"
+        finally:
+            await provider.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("model,size,ratio", [
+    ("MiniMax-H3-Lite", (160, 90), "16:9"),
+    ("MiniMax-H3-Lite", (90, 160), "9:16"),
+    ("MiniMax-H3-Lite", (100, 100), "1:1"),
+    ("MiniMax-H3", (160, 90), "adaptive"),
+])
+def test_minimax_lite_uses_supported_explicit_ratio(tmp_path, model, size, ratio):
+    async def scenario():
+        calls = []
+        def reject(request):
+            calls.append(request)
+            return httpx.Response(403, json={"error": {"code": "AccessDenied"}})
+        provider = Provider(settings(tmp_path, video={**config("minimax"), "base_url": "https://models.example", "model": model}))
+        await provider.client.aclose()
+        provider.client = httpx.AsyncClient(transport=httpx.MockTransport(reject))
+        image = tmp_path / "original.png"
+        Image.new("RGB", size, "blue").save(image)
+        output = tmp_path / "clip.mp4"
+        try:
+            with pytest.raises(ProviderError):
+                await provider.generate_clip(image, "Keep the original illustration.", output, 5)
+            assert len(calls) == 1
+            assert calls[0].url.path == "/v2/video_generation"
+            assert json.loads(calls[0].content)["ratio"] == ratio
+            trace = json.loads(output.with_suffix(".task.json").read_text())
+            assert trace["parameters"]["ratio"] == ratio
+            assert trace["status"] == "rejected"
         finally:
             await provider.close()
     asyncio.run(scenario())

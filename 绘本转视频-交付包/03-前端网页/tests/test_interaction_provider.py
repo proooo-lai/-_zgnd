@@ -33,7 +33,7 @@ def test_fast_vision_only_changes_interaction_requests(tmp_path):
             payload = json.loads(request.content)
             seen.append(payload["model"])
             result = {"found": True, "label": "小鸟", "description": "小鸟站在这里。",
-                      "bbox_1000": [400, 300, 650, 800], "confidence": .9}
+                      "coordinate_space": "full_frame", "bbox_1000": [400, 300, 650, 800], "confidence": .9}
             return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(result)}}]})
         await provider.client.aclose()
         provider.client = httpx.AsyncClient(transport=httpx.MockTransport(reply))

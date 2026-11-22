@@ -16,11 +16,11 @@ from PIL import Image
 from pydantic import ValidationError
 
 from .answer_validation import AnswerDraft, EvidenceVerdict, VERIFIER_VERSION
-from .grounding import ClickObservation, mark_click, pointed_frame
+from .grounding import ClickObservation, make_click_context, pointed_frame
 from .followup import draft_followup, joined
 from .providers import ANSWER_CALLBACK, ANSWER_VOICE, ProviderError
 from .safety import UNTRUSTED_CONTENT_RULE, redact_privacy, safety_check
-from .schema import normalize_bbox, page_to_video_bbox, video_to_page_point
+from .schema import normalize_bbox, page_to_video_bbox, video_to_page_point, write_json
 from .video import run_process
 
 
@@ -725,7 +725,7 @@ class Interactor:
         # Generated footage always uses the actual clicked frame, never original-page boxes.
         if not match and self.provider.available("vision"):
             image = await self.frame(book, timestamp, folder / "frame.jpg", frame)
-            point_image = mark_click(image, folder / "click-reference.png", x, y)
+            images, click_transform = make_click_context(image, folder, x, y)
             # Source-page geometry is not valid in generated footage. Sending
             # it as context can cause the model to copy an obsolete box even
             # when it receives the actual frame; only names help identification.
@@ -733,23 +733,36 @@ class Interactor:
                             for obj in page.get("objects", []) if isinstance(obj, dict)]
             prompt = (UNTRUSTED_CONTENT_RULE + f'\n识别当前视频帧归一化点击坐标({x:.5f},{y:.5f})指向的最小独立语义对象。'
                 '第一张为原始视频帧，第二张仅叠加红色空心圆和十字，十字中心就是点击点。'
+                '第三张是点击附近的局部放大原图，第四张是同一局部的标记图；请优先观察局部十字中心，再用整帧核对身份。'
                 '只识别中心覆盖的对象；标记本身不是物体，原帧用于核对被标记遮挡的细节。'
                 '不要将整幅图或邻近但未点击的对象当目标。遮挡、背景、空白或看不清就found=false。不要只根据原书对象猜测。'
+                'label使用可观察的类别和外观消歧（如穿某色衣服的小女孩），不要猜测人物姓名或身份。'
+                'description只写静态可见特征，不猜动作、意图或故事情节；动作和故事关联留待有证据的追问回答。'
                 '\n输出JSON {"found":true,"label":"对象名称","description":"面向儿童的一句可见事实，不提红色标记或坐标",'
-                '"bbox_1000":[左,上,右,下],"confidence":0.9}。bbox_1000为整张原帧的0到1000整数端点，'
+                '"coordinate_space":"crop","bbox_1000":[左,上,右,下],"confidence":0.9}。'
+                '优先用crop坐标，bbox_1000为第三/四张局部图的0到1000整数端点；'
+                '若完整对象超出局部边界，则用整帧定位并明确coordinate_space="full_frame"，不得把裁剪边界当完整对象。'
                 '右和下是边界位置，不能填宽高，也不能填0到1小数。found=false时bbox_1000=[]。'
+                + '\n局部到整帧变换（仅供核对）：' + json.dumps(click_transform, ensure_ascii=False)
                 + "\n上下文仅供辨认名字：" + json.dumps({"objects": source_names}, ensure_ascii=False))
-            raw = await self.provider.vision(prompt, [image, point_image])
+            raw = await self.provider.vision(prompt, images)
             try:
                 observation = ClickObservation.model_validate(raw)
             except ValidationError:
-                observation = ClickObservation(found=False)
-            bbox = observation.video_box()
-            obj = observation.model_dump(exclude={"bbox_1000"})
+                observation = ClickObservation(found=False,coordinate_space='full_frame')
+            bbox = observation.video_box(click_transform)
+            obj = observation.model_dump(exclude={"bbox_1000", "coordinate_space"})
             obj["bbox"] = bbox
             contains = bbox and bbox[0] - 0.015 <= x <= bbox[0] + bbox[2] + 0.015 and bbox[1] - 0.015 <= y <= bbox[1] + bbox[3] + 0.015
             confidence = observation.confidence
             confident = isinstance(confidence, (float, int)) and math.isfinite(confidence) and confidence >= 0.6
+            try:
+                json.dumps(raw,allow_nan=False)
+                audit_raw = raw
+            except (ValueError,TypeError):
+                audit_raw = {'invalid_json_value':True}
+            write_json(folder / 'click-grounding.json', {'version':'click-crop-v1', 'transform':click_transform,
+                'model_result':audit_raw, 'frame_bbox':bbox, 'accepted':bool(obj.get('found') and contains and confident)})
             if obj.get("found") and contains and confident:
                 result.update(answer=object_introduction(obj, book.get("language")), uncertain=False,
                     object=obj, boxes=[{"bbox": bbox, "label": str(obj.get("label", "")), "source": "clicked_video_frame"}])

@@ -109,7 +109,7 @@ def test_generated_video_click_uses_actual_uploaded_frame_not_old_pdf_boxes(setu
     store, settings = setup
     make_book(store, generated=True)
     provider = ScriptedProvider([{"found": True, "label": "moving bird", "description": "It is blue.",
-                                 "bbox_1000": [380, 450, 580, 700], "confidence": .95}], enabled=("vision",))
+                                 "coordinate_space": "full_frame", "bbox_1000": [380, 450, 580, 700], "confidence": .95}], enabled=("vision",))
     result = asyncio.run(Interactor(store, provider, settings).touch("synthetic", .46, .55, 12, "s1", encoded_frame("red")))
     assert result["object"]["label"] == "moving bird"
     assert result["boxes"][0]["source"] == "clicked_video_frame"
@@ -123,7 +123,7 @@ def test_video_touch_context_keeps_names_but_excludes_source_geometry(setup):
     book["pages"][0]["objects"][1]["geometry"] = {"polygon": [[.25, .5], [.45, .7]]}
     store.save(book)
     provider = ScriptedProvider([{"found": True, "label": "apple", "description": "It is red.",
-                                 "bbox_1000": [380, 450, 580, 700], "confidence": .95}], enabled=("vision",))
+                                 "coordinate_space": "full_frame", "bbox_1000": [380, 450, 580, 700], "confidence": .95}], enabled=("vision",))
     result = asyncio.run(Interactor(store, provider, settings).touch("synthetic", .46, .55, 12, "s1", encoded_frame()))
     context = json.loads(provider.calls[0]["prompt"].rsplit("\n", 1)[1].split("：", 1)[1])
     assert any(item.get("label") == "apple" and item.get("label_zh") == "苹果" for item in context["objects"])
@@ -135,7 +135,7 @@ def test_low_confidence_visual_hit_is_never_marked_certain(setup):
     store, settings = setup
     make_book(store, generated=True)
     provider = ScriptedProvider([{"found": True, "label": "maybe bird", "description": "Unclear.",
-                                 "bbox_1000": [380, 450, 580, 700], "confidence": .1}], enabled=("vision",))
+                                 "coordinate_space": "full_frame", "bbox_1000": [380, 450, 580, 700], "confidence": .1}], enabled=("vision",))
     result = asyncio.run(Interactor(store, provider, settings).touch("synthetic", .46, .55, 12, "s1", encoded_frame()))
     assert result["uncertain"] is True
 
@@ -143,7 +143,7 @@ def test_low_confidence_visual_hit_is_never_marked_certain(setup):
 def test_visual_box_not_containing_click_is_rejected(setup):
     store, settings = setup
     make_book(store, generated=True)
-    provider = ScriptedProvider([{"found": True, "label": "bird elsewhere", "bbox_1000": [800, 800, 900, 900],
+    provider = ScriptedProvider([{"found": True, "label": "bird elsewhere", "coordinate_space": "full_frame", "bbox_1000": [800, 800, 900, 900],
                                  "confidence": .99}], enabled=("vision",))
     result = asyncio.run(Interactor(store, provider, settings).touch("synthetic", .46, .55, 12, "s1", encoded_frame()))
     assert result["boxes"] == []

@@ -46,12 +46,12 @@ def test_story_followup_routes_frame_and_story_to_separate_models(exercise):
     vd=[c for c in p.calls if c[0]=='vision' and 'ANSWER_VERIFICATION_V1' not in c[1]]
     cd=[c for c in p.calls if c[0]=='chat' and 'ANSWER_VERIFICATION_V1' not in c[1]]
     assert len(vd)==len(cd)==1
-    assert len(vd[0][2])==2
+    assert len(vd[0][2])==4
     assert 'The bird shares the apple with a rabbit.' not in vd[0][1]
     assert 'The bird shares the apple with a rabbit.' in cd[0][1]
     vr=next(c for c in p.calls if c[0]=='vision' and 'ANSWER_VERIFICATION_V1' in c[1])
     cr=next(c for c in p.calls if c[0]=='chat' and 'ANSWER_VERIFICATION_V1' in c[1])
-    assert len(vr[2])==2
+    assert len(vr[2])==4
     assert 'A red apple is under the tree.' not in vr[1]
     assert '小鸟把苹果分享给兔子。' not in vr[1]
     assert '小鸟把苹果分享给兔子。' in cr[1]
@@ -79,7 +79,7 @@ def test_selected_point_is_available_to_both_action_and_action_review(tmp_path):
     assert len(calls)==2
     for _,prompt,images in calls:
         assert '0.47' in prompt and '0.55' in prompt
-        assert len(images)==2
+        assert len(images)==4
         with Image.open(images[1]) as marked:
             px=marked.convert('RGB').getpixel((round(.47*(marked.width-1)),round(.55*(marked.height-1))))
             assert px[0]>180 and px[1]<70

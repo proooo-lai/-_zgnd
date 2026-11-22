@@ -1,0 +1,60 @@
+{
+  "date": "2026-11-22",
+  "scope": "Click magnification, evidence-reviewed object followup, OCR geometry merge and diagnostic-only source-pixel video protection",
+  "input_boundary": {
+    "automated_tests": "original synthetic fixtures only",
+    "live_checks": "previously saved authorized book frames and generated clips; developer-authored questions",
+    "competition_queries_or_hidden_answers_used": false,
+    "source_derived_media_annotations_and_raw_model_outputs_committed": false
+  },
+  "verification": {
+    "full_offline_pytest": {"passed": 315, "failed": 0, "skipped": 0, "existing_dependency_warnings": 6},
+    "pip_check": "No broken requirements found",
+    "diff_check": "passed",
+    "saved_clip_cli": "local-only command completed; source book file sizes and modification times unchanged; no model call",
+    "restarted_workbench": "HTTP homepage and status available on 8765, seven object-assistant routes present, generation idle",
+    "actual_synthetic_video": "protected source pixels, preserved raw hash/duration and motion in unprotected regions verified using real FFmpeg output",
+    "new_dependencies": []
+  },
+  "live_click_checks": {
+    "after_click_crop_before_followup_crop": {
+      "previously_failed_multi_panel_target": {"recognized": true, "server_seconds": 6.168},
+      "small_object_on_other_frame": {"recognized": true, "server_seconds": 4.996},
+      "blank_area": {"correctly_unrecognized": true, "server_seconds": 4.764},
+      "followup": "rejected by current-action evidence review; not counted as successful"
+    },
+    "after_shared_generation_and_review_crop": {
+      "fresh_multi_panel_click": {"recognized": true, "server_seconds": 8.075},
+      "one_authored_object_followup": {
+        "success": true,
+        "uncertain": false,
+        "current_frame_and_book_background_separately_supported": true,
+        "page_evidence_returned": true,
+        "answer_wav_downloaded_and_samples_valid": true,
+        "server_seconds": 27.29
+      },
+      "parent_history_empty": true
+    },
+    "method": "isolated ASGI HTTP routes with actual configured services; no browser, real microphone or speaker listening",
+    "limitations": "small development sample, different code revisions, not overall recognition accuracy, P50/P95, independent-book generalization or official latency compliance"
+  },
+  "video_protection_experiment": {
+    "saved_failed_clips_considered": 5,
+    "refused_due_to_excessive_source_area": 1,
+    "locally_composited_and_visually_inspected": 4,
+    "processed_clips_rejected_by_real_quality_review": 4,
+    "processed_clips_accepted": 0,
+    "observed_limitations": ["generated camera/layout drift", "patch seams and duplicated details", "source region geometry may be incomplete"],
+    "enabled_in_default_generation": false,
+    "new_video_submissions": 0,
+    "production_book_published": false,
+    "old_failed_run_promoted": false
+  },
+  "remaining_work": [
+    "Validate registration/tracking or other source-preserving generation controls before enabling video repair",
+    "Resolve all original quality failures and uncertainties before releasing full-book output",
+    "Browser operation, real microphone, speaker listening and longer continuous interaction",
+    "Independent authorized book cold-start generalization",
+    "Formal evaluation interface, final official latency threshold and designated human safety review"
+  ]
+}

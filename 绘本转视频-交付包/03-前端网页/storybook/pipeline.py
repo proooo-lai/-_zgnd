@@ -14,6 +14,7 @@ import re
 import shutil
 import time
 import uuid
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -23,6 +24,7 @@ from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .providers import ProviderError
+from .fidelity import protect_video_details, PROTECTION_VERSION, ProtectionPlanningError
 
 from .safety import UNTRUSTED_CONTENT_RULE, review_document
 from .schema import (SCHEMA_VERSION, rect_bbox, sanitize_objects, sanitize_words,
@@ -82,13 +84,14 @@ def validate_video_quality(result: dict) -> dict:
 
 
 async def inspect_video_quality(source: Path, clip: Path, duration: float, provider, settings,
-                                book_dir: Path, scene_index: int) -> dict:
+                                book_dir: Path, scene_index: int, *, protection: dict | None = None) -> dict:
     """Compare original art with real generated frames, without regeneration."""
     if not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration <= 0:
         raise ValueError("原始生成片段时长无效，无法进行质量核对。")
     agent_dir = book_dir / "agents"
     agent_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"video-quality-{scene_index + 1:04}"
+    protected = bool(protection and protection.get('status') == 'composited')
+    stem = f"video-quality-{scene_index + 1:04}" + ('-protected' if protected else '')
     sample_dir = agent_dir / stem
     sample_dir.mkdir(exist_ok=True)
     tail = max(0.0, duration - max(0.08, 1 / max(1, settings.fps)))
@@ -112,6 +115,14 @@ async def inspect_video_quality(source: Path, clip: Path, duration: float, provi
               "任何major应consistent=false；没有确证差异但无法判断时consistent=true且uncertain=true。"
               '只返回JSON {"consistent":true,"issues":[{"severity":"major或minor","description":"具体原图与哪一采样帧的差异"}],"uncertain":false}。'
               "无问题时issues=[]。不要把采样通过表述为所有帧已验证。")
+    if protected:
+        prompt += ('\n本视频叠加了有限原图文字/小物件保护区域；这不证明视频已经正确。'
+            '额外逐帧核对保护区与运动画面是否对齐，是否出现错位、重影、重复对象、裁断或不合理遮挡。'
+            '这些问题影响语义或明显破坏画面时也是major，必须consistent=false。'
+            '另返回protection_aligned布尔字段；只有能确认三帧保护区域及边界均对齐才为true，'
+            '无法确认也必须false，不可因原文来自原图便默认通过。'
+            '\n保护区域参考坐标与变换：'+json.dumps({k:protection[k] for k in
+                ('regions','reference_transform','video_size','mapping') if k in protection},ensure_ascii=False))
     (agent_dir / f"{stem}.prompt.txt").write_text(prompt, encoding="utf-8")
     try:
         raw = await provider.vision(prompt, [source, *images])
@@ -129,6 +140,12 @@ async def inspect_video_quality(source: Path, clip: Path, duration: float, provi
     write_json(agent_dir / f"{stem}.json", {"model_result": raw, "sample_seconds": seconds,
                "source_sha256": sha256_file(source), "clip_sha256": sha256_file(clip)})
     quality = validate_video_quality(raw)
+    if protected:
+        quality['protection_aligned'] = raw.get('protection_aligned') is True
+        quality['postprocessing_version'] = protection.get('version')
+        if not quality['protection_aligned']:
+            quality.update(consistent=False,decision='rejected')
+            quality['issues'].append({'severity':'major','description':'无法确认原图保护区域与生成画面对齐，拒绝合成片段。'})
     quality.update(sample_seconds=seconds,
                    sample_paths=[str(image.relative_to(book_dir)).replace("\\", "/") for image in images],
                    source_sha256=sha256_file(source), clip_sha256=sha256_file(clip))
@@ -139,6 +156,35 @@ async def inspect_video_quality(source: Path, clip: Path, duration: float, provi
 def require_video_quality(quality: dict, page_number: int):
     if quality["decision"] == "rejected":
         raise ValueError(f"第 {page_number} 页视频与原绘本不一致，质量检查已拒绝该片段；原片和核对结果已保留，未自动重试视频生成。")
+
+
+async def review_clip_with_protection(source: Path, reference: Path, clip: Path, page: dict,
+                                     transform: dict, provider, settings, book_dir: Path, index: int,
+                                     *, duration: float, encode_lock=None):
+    """Inspect raw output first; make at most one local, separately gated repair.
+
+    Never changes passing footage, never resubmits a paid generation, and never
+    promotes a refused/failed repair to success. Each inspection has its own files.
+    """
+    raw_quality = await inspect_video_quality(source,clip,duration,provider,settings,book_dir,index)
+    audit = {'raw_quality':raw_quality,'quality':raw_quality,
+             'detail_protection':{'version':PROTECTION_VERSION,'status':'not_required'}}
+    if raw_quality['decision'] == 'rejected':
+        output = book_dir/'raw_clips'/f'protected-{index+1:04}.mp4'
+        try:
+            async with (encode_lock or asyncio.Semaphore(1)):
+                plan = await protect_video_details(reference,clip,output,page,transform,settings)
+        except ProtectionPlanningError as error:
+            plan = {'version':PROTECTION_VERSION,'status':'refused','reason':str(error)}
+        audit['detail_protection'] = plan
+        if plan['status'] == 'composited':
+            clip = output
+            plan['output_path'] = output.relative_to(book_dir).as_posix()
+            audit['quality'] = await inspect_video_quality(source,clip,duration,provider,settings,
+                                                           book_dir,index,protection=plan)
+    (book_dir/'agents').mkdir(parents=True,exist_ok=True)
+    write_json(book_dir/'agents'/f'detail-review-{index+1:04}.json',audit)
+    return clip,audit
 
 
 def assert_allowed_input(path: Path) -> Path:
@@ -320,10 +366,27 @@ def merge_visual_page(page: dict, result: dict) -> dict:
             objects.append(item)
     merged["objects"] = objects
     visual_words = sanitize_words(result.get("words", []))
+    merged['visual_words'] = [{**word, 'source':'vision'} for word in visual_words]
     # Use exact PDF geometry only for words confirmed to belong to story text.
-    confirmed = [word for word in page["words"]
-                 if word["text"].strip().casefold() in merged["text"].casefold()]
-    merged["words"] = confirmed if confirmed else visual_words
+    def comparable(text):
+        # Match formatting variants only; never overwrite original OCR text.
+        text = unicodedata.normalize('NFKC',text).translate(str.maketrans({'’':"'",'‘':"'",'“':'"','”':'"'}))
+        return re.sub(r'\s+','',text).casefold()
+    story_text = comparable(merged['text'])
+    confirmed = [word for word in page["words"] if comparable(word['text']) and comparable(word['text']) in story_text]
+    # PDF geometry is authoritative for its own words, not for handwritten or
+    # raster-only story text. Preserve both sources without replacing raw OCR.
+    combined = [dict(word) for word in confirmed]
+    for word in visual_words:
+        if confirmed and comparable(word['text']) not in story_text:
+            continue
+        x,y,w,h = word['bbox']
+        already_covered = any(comparable(word['text']) in comparable(native['text'])
+            and native['bbox'][0] <= x+w/2 <= native['bbox'][0]+native['bbox'][2]
+            and native['bbox'][1] <= y+h/2 <= native['bbox'][1]+native['bbox'][3] for native in confirmed)
+        if not already_covered:
+            combined.append({**word,'source':'vision'})
+    merged["words"] = combined
     return merged
 
 
@@ -567,9 +630,12 @@ async def build_book(pdf_path: Path, book_dir: Path, provider, settings,
             scene["raw_clip_sha256"] = sha256_file(clip)
             raw_duration = media_duration(await probe_media(clip, settings.ffprobe))
             scene["raw_clip_duration"] = raw_duration
+            # Local source-patch restoration remains diagnostic-only: saved
+            # clips showed camera drift and seams. Do not silently enable an
+            # unvalidated repair on newly generated books.
             async with semaphore:
-                scene["quality"] = await inspect_video_quality(
-                    image, clip, raw_duration, provider, settings, book_dir, index)
+                scene['quality'] = await inspect_video_quality(
+                    image,clip,raw_duration,provider,settings,book_dir,index)
             await report(0.53 + 0.34 * complete / len(timeline),
                          f"第 {page['number']} 页视频与原图一致性核对", "Quality",
                          page=page["number"], decision=scene["quality"]["decision"])

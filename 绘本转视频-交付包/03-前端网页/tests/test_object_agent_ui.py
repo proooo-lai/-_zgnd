@@ -75,3 +75,25 @@ fetch=async()=>response(child('object-one','apple'));
 (async()=>{await ObjectAssistant.open(snapshot);const recording=$('object-microphone').onclick();ObjectAssistant.close();permit({getTracks:()=>[{stop(){stopped++}}]});await recording;console.log(JSON.stringify({stopped,hidden:$('object-agent').classList.contains('hidden')}))})()
 ''')
     assert result == {"stopped": 1, "hidden": True}
+
+
+def test_missing_object_interface_explains_restart_instead_of_retrying_recognition():
+    result = run_ui(r'''
+fetch=async()=>({ok:false,status:404,json:async()=>({detail:'Not Found'})});
+(async()=>{await ObjectAssistant.open(snapshot);console.log(JSON.stringify({title:$('object-title').textContent,status:$('object-status').textContent,disabled:$('object-send').disabled,texts:$('object-history').children.map(x=>x.children.map(y=>y.textContent).join(' '))}));ObjectAssistant.close()})()
+''')
+    assert "重启" in result["status"] and "刷新" in result["status"]
+    assert "正在认识" not in result["title"]
+    assert result["disabled"] is True
+    assert any("接口" in text and "重启" in text for text in result["texts"])
+
+
+def test_missing_book_and_provider_errors_do_not_claim_the_backend_is_outdated():
+    for code, detail in [(404, "未找到绘本或所请求的文件"), (502, "视觉服务暂不可用")]:
+        result = run_ui('fetch=async()=>({ok:false,status:' + str(code) + ',json:async()=>({detail:'
+                        + json.dumps(detail) + r'''})});
+(async()=>{await ObjectAssistant.open(snapshot);console.log(JSON.stringify({title:$('object-title').textContent,status:$('object-status').textContent,texts:$('object-history').children.map(x=>x.children.map(y=>y.textContent).join(' '))}));ObjectAssistant.close()})()
+''')
+        assert any(detail in text for text in result["texts"])
+        assert "重启" not in result["status"]
+        assert "正在认识" not in result["title"]

@@ -127,7 +127,14 @@ window.ObjectAssistant = (() => {
     try {
       const response=await fetch(path(view,suffix),{method:"POST",headers:isForm?{}:{"Content-Type":"application/json"},body:isForm?body:JSON.stringify(body),signal:controller.signal});
       if(!live(view,revision))return null;
-      if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(typeof data.detail==="string"?data.detail:"请求失败，请稍后重试。");}
+      if(!response.ok){
+        const data=await response.json().catch(()=>({}));
+        if(response.status===404&&suffix===""&&data.detail==="Not Found"){
+          const error=new Error("对象识别接口尚未加载，请重启工作台，然后刷新页面。");
+          error.code="object_interface_unavailable";throw error;
+        }
+        throw new Error(typeof data.detail==="string"?data.detail:"请求失败，请稍后重试。");
+      }
       if(!streaming||!response.headers.get("content-type")?.includes("text/event-stream"))return await response.json();
       reader=response.body.getReader();const decoder=new TextDecoder();let buffer="";
       const parse=block=>{let type="message",lines=[];for(const line of block.split("\n")){if(line.startsWith("event:"))type=line.slice(6).trim();if(line.startsWith("data:"))lines.push(line.slice(5).trimStart());}if(lines.length)dispatch(type,JSON.parse(lines.join("\n")));};
@@ -164,7 +171,12 @@ window.ObjectAssistant = (() => {
       render(view,data.result);message("只在这个窗口聊天。可输入问题，或点击“说话”。");
       if(data.result.audio_url){audio.src=safeURL(data.result.audio_url)||"";audio.onplaying=()=>metric(view,context,data.result.turn_id,"audio_playing");audio.play().catch(()=>message("点击“播放回答”收听介绍。"));}
       $("object-question").focus();
-    } catch(error) {if(live(view)){view.agent=null;turn("assistant","本轮识别未完成："+(error.name==="AbortError"?"等待超时，请重新点选。":error.message),true);message("请重新点击目标。");}}
+    } catch(error) {if(live(view)){
+      view.agent=null;const unavailable=error.code==="object_interface_unavailable";
+      $("object-title").textContent=unavailable?"对象助手需要重启工作台":"本轮识别未完成";
+      turn("assistant","本轮识别未完成："+(error.name==="AbortError"?"等待超时，请重新点选。":error.message),true);
+      message(unavailable?"请重启工作台并刷新页面，再点选目标。":"请重新点击目标。");
+    }}
     finally {if(live(view))controls(view,false);}
   }
   function cancelServer(view, requestId=view?.requestId) {

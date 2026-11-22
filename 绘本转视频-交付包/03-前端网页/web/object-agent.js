@@ -87,9 +87,11 @@ window.ObjectAssistant = (() => {
     const button=node("button","button subtle",label);button.type="button";
     button.onclick=()=>{if(!live(view))return;stopAnswer();stopAudio();audio.src=url;audio.play().catch(()=>message("请检查浏览器的声音权限。"));};container.append(button);
   }
-  function render(view, result) {
+  function render(view, result, label = null) {
     const partial=["partial","failed"].includes(result.status),audioFailed=result.audio_error||["partial","failed"].includes(result.audio_status);
     const row=turn("assistant",partial?(result.answer_partial||"本轮回答未完成。"):(result.answer||"没有获得可确认的回答。"),result.uncertain||partial);
+    if(label)row.children[0].textContent=label;
+    if(result.background_execution)row.append(node("p","small",result.background_execution==="reused_same_object"?"已复用本对象的背景介绍。":"本轮生成的原书背景介绍。"));
     if(result.uncertain)row.append(node("p","small","这条回答存在不确定性，请核对原书。"));
     if(partial||audioFailed)row.append(node("p","turn-warning",result.error||result.audio_error||"本轮音频不完整。"));
     for(const evidence of result.evidence||[]) {
@@ -152,16 +154,33 @@ window.ObjectAssistant = (() => {
       clearTimeout(timer);if(reader)reader.releaseLock();if(view.controller===controller)view.controller=null;
     }
   }
+  async function background(view) {
+    const revision=view.revision;
+    message("正在查找这个对象的原书背景与关系…");
+    try {
+      const result=await request(view,"/background",{session_id:view.parent,voice:view.voice},{kind:"object_background",started:performance.now()},null,false);
+      if(!live(view,revision)||!result)return;
+      render(view,result,"相关介绍与背景");
+      message(result.background_state==="supported"?"背景介绍完成，可展开原书依据核对，或继续提问。":"原书背景暂无法确认，可核对原书或继续提问。");
+    } catch(error) {
+      if(live(view,revision)){
+        const row=turn("assistant","背景介绍暂未完成："+(error.name==="AbortError"?"等待超时，可继续提问。":error.message),true);
+        row.children[0].textContent="相关介绍与背景";
+        message("对象已识别，背景介绍暂不可用，仍可向它提问。");
+      }
+    }
+  }
   async function open(snapshot) {
     close(false);stopAnswer();
     const view={...snapshot,revision:++sequence,agentId:"object-"+crypto.randomUUID().replaceAll("-",""),agent:null,ready:false,working:false,mic:null,openingMic:false};current=view;
+    const revision=view.revision;
     view.agent={id:view.agentId,session_id:view.agentId};
     panel.classList.remove("hidden");$("object-title").textContent="正在认识这个朋友…";$("object-avatar").removeAttribute("src");
     $("object-history").replaceChildren();$("object-question").value="";controls(view,true);message("视频已暂停，正在识别点选对象…");
     const context={kind:"touch",started:performance.now()};unlock();
     try {
       const data=await request(view,"",{x:view.x,y:view.y,time:view.time,frame:view.frame,session_id:view.parent,voice:view.voice,agent_id:view.agentId},context,null,false);
-      if(!live(view)||!data)return;
+      if(!live(view,revision)||!data)return;
       if(!data.agent){view.agent=null;$("object-title").textContent="还没有认清目标";render(view,data.result);message("请点击另一个清晰的人物或物品。");return;}
       view.agent=data.agent;
       view.ready=true;
@@ -171,13 +190,14 @@ window.ObjectAssistant = (() => {
       render(view,data.result);message("只在这个窗口聊天。可输入问题，或点击“说话”。");
       if(data.result.audio_url){audio.src=safeURL(data.result.audio_url)||"";audio.onplaying=()=>metric(view,context,data.result.turn_id,"audio_playing");audio.play().catch(()=>message("点击“播放回答”收听介绍。"));}
       $("object-question").focus();
-    } catch(error) {if(live(view)){
+      if(view.agent.background_available===true)await background(view);
+    } catch(error) {if(live(view,revision)){
       view.agent=null;const unavailable=error.code==="object_interface_unavailable";
       $("object-title").textContent=unavailable?"对象助手需要重启工作台":"本轮识别未完成";
       turn("assistant","本轮识别未完成："+(error.name==="AbortError"?"等待超时，请重新点选。":error.message),true);
       message(unavailable?"请重启工作台并刷新页面，再点选目标。":"请重新点击目标。");
     }}
-    finally {if(live(view))controls(view,false);}
+    finally {if(live(view,revision))controls(view,false);}
   }
   function cancelServer(view, requestId=view?.requestId) {
     if(!view?.agentId||!requestId)return Promise.resolve();

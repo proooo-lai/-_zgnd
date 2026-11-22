@@ -52,7 +52,60 @@ fetch=async(path,options)=>{if(path.endsWith('/cancel'))return response({cancell
     assert result["calls"][1]["body"]["session_id"] == "main"
     assert result["calls"][1]["body"]["voice"] == "Cherry"
     assert result["calls"][1]["body"]["request_id"]
+    assert len(result["calls"]) == 2
     assert any("Story-backed answer." in text for text in result["texts"])
+
+
+def test_recognized_object_automatically_loads_evidenced_background_without_playing_over_intro():
+    result = run_ui(r'''
+const calls=[],played=[];Audio.prototype.play=function(){played.push(this.src);return Promise.resolve()};
+fetch=async(path,options)=>{if(path.includes('/cancel?'))return response({cancelled:true});const body=JSON.parse(options.body);calls.push({path,body});if(path.endsWith('/background'))return response({answer:'The bird shares the apple.',background_state:'supported',background_execution:'live',evidence:[{page_number:2,quote:'The bird shares the apple with a rabbit.'}],audio_url:'/background.wav'});const data=child(body.agent_id,'apple');data.agent.background_available=true;data.result.audio_url='/intro.wav';return response(data)};
+(async()=>{await ObjectAssistant.open(snapshot);const texts=$('object-history').children.map(x=>x.children.map(y=>y.textContent).join(' '));const details=$('object-history').children.flatMap(x=>x.children.filter(y=>y.tag==='details').map(y=>y.children.map(z=>z.textContent).join(' ')));console.log(JSON.stringify({calls,texts,details,played,disabled:$('object-send').disabled}));ObjectAssistant.close()})()
+''')
+    assert len(result["calls"]) == 2
+    assert result["calls"][1]["path"].endswith("/object-agents/" + result["calls"][0]["body"]["agent_id"] + "/background")
+    assert set(result["calls"][1]["body"]) == {"session_id", "request_id", "voice"}
+    assert result["calls"][1]["body"]["session_id"] == "main"
+    assert result["calls"][1]["body"]["voice"] == "Cherry"
+    assert any("相关介绍与背景" in text and "The bird shares the apple." in text for text in result["texts"])
+    assert any("2" in text and "The bird shares the apple with a rabbit." in text for text in result["details"])
+    assert result["played"] == ["/intro.wav"]
+    assert result["disabled"] is False
+
+
+def test_background_failure_preserves_recognized_object_and_question_controls():
+    result = run_ui(r'''
+const calls=[];fetch=async(path,options)=>{if(path.includes('/cancel?'))return response({cancelled:true});calls.push(path);if(path.endsWith('/background'))return {ok:false,status:502,json:async()=>({detail:'Background unavailable.'})};const body=JSON.parse(options.body);if(path.endsWith('/ask/stream'))return response({answer:'Still the apple.'});const data=child(body.agent_id,'apple');data.agent.background_available=true;return response(data)};
+(async()=>{await ObjectAssistant.open(snapshot);const title=$('object-title').textContent,disabled=$('object-send').disabled;$('object-question').value='What color?';await $('object-form').onsubmit({preventDefault(){}});console.log(JSON.stringify({calls,title,disabled,texts:$('object-history').children.map(x=>x.children.map(y=>y.textContent).join(' '))}));ObjectAssistant.close()})()
+''')
+    assert any(path.endswith("/background") for path in result["calls"])
+    assert "apple" in result["title"] and "未完成" not in result["title"]
+    assert result["disabled"] is False
+    assert any("Background unavailable." in text for text in result["texts"])
+    assert any("Still the apple." in text for text in result["texts"])
+
+
+@pytest.mark.parametrize("action", ["close", "new_target", "interrupt"])
+def test_late_background_is_cancelled_and_cannot_change_the_current_window(action):
+    result = run_ui(r'''
+const calls=[];let finish,aborted=false;
+fetch=async(path,options)=>{calls.push({path,body:options.body?JSON.parse(options.body):null});if(path.includes('/cancel?'))return response({cancelled:true});if(path.endsWith('/background')){options.signal.addEventListener('abort',()=>aborted=true);return new Promise(resolve=>finish=resolve)}const body=JSON.parse(options.body),data=child(body.agent_id,body.x===.7?'rabbit':'apple');data.agent.background_available=body.x!==.7;return response(data)};
+(async()=>{const opening=ObjectAssistant.open(snapshot);await flush();const started=Boolean(finish);
+''' + ("ObjectAssistant.close();" if action == "close" else
+       "await ObjectAssistant.open({...snapshot,x:.7});" if action == "new_target" else
+       "await $('object-stop').onclick();") + r'''
+if(finish)finish(response({answer:'Late background must disappear.',background_state:'supported'}));await opening;
+console.log(JSON.stringify({started,aborted,calls,title:$('object-title').textContent,hidden:$('object-agent').classList.contains('hidden'),disabled:$('object-send').disabled,texts:$('object-history').children.map(x=>x.children.map(y=>y.textContent).join(' '))}));ObjectAssistant.close()})()
+''')
+    assert result["started"] and result["aborted"]
+    assert any("/cancel?" in call["path"] and "request_id=" + result["calls"][1]["body"]["request_id"] in call["path"] for call in result["calls"])
+    assert not any("Late background must disappear." in text for text in result["texts"])
+    if action == "close":
+        assert result["hidden"]
+    elif action == "new_target":
+        assert "rabbit" in result["title"]
+    else:
+        assert "apple" in result["title"] and result["disabled"] is False
 
 
 def test_new_target_ignores_late_old_recognition_and_close_ignores_late_answer():

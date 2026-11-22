@@ -58,6 +58,13 @@ class ObjectQuestion(BaseModel):
     voice: str | None = Field(default=None, max_length=80)
 
 
+class ObjectBackground(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
+    request_id: str = Field(pattern=r"^[0-9a-fA-F-]{36}$")
+    voice: str | None = Field(default=None, max_length=80)
+
+
 class ObjectTouch(Touch):
     model_config = ConfigDict(extra="forbid")
     agent_id: str = Field(pattern=r"^object-[a-f0-9]{32}$")
@@ -335,6 +342,10 @@ def create_app(settings=None, provider=None):
     @app.post("/api/books/{book_id}/object-agents/{agent_id}/ask")
     async def ask_object(book_id: str, agent_id: str, body: ObjectQuestion):
         return await object_agents.ask(book_id, agent_id, body.session_id, body.request_id, body.question.strip(), voice=body.voice)
+
+    @app.post("/api/books/{book_id}/object-agents/{agent_id}/background")
+    async def object_background(book_id: str, agent_id: str, body: ObjectBackground):
+        return await object_agents.background(book_id, agent_id, body.session_id, body.request_id, voice=body.voice)
 
     @app.post("/api/books/{book_id}/object-agents/{agent_id}/ask/stream")
     async def ask_object_stream(book_id: str, agent_id: str, body: ObjectQuestion):

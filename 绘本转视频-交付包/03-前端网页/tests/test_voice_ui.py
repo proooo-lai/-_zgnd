@@ -66,3 +66,25 @@ walk($('provider-fields'));console.log(JSON.stringify(inputs));
     assert inputs['cfg-interaction_vision-base_url']['value'] == 'https://models.example/v1'
     assert inputs['cfg-interaction_vision-api_key']['value'] == ''
     assert inputs['cfg-interaction_vision-api_key']['type'] == 'password'
+
+
+@pytest.mark.parametrize('failed', [False, True])
+def test_cancelled_old_request_cannot_unlock_or_write_into_a_new_question(failed):
+    interrupt=next(line for line in APP.read_text().splitlines() if line.startswith('function interruptAnswer('))
+    fixture=r'''
+const state={book:{id:'book'},session:'main',busy:false},pending=[],turns=[];
+const window={ObjectAssistant:{close(){}}},videoAnnotations={clear(){}},video={currentTime:0,pause(){}},Language={ttsVoice:()=>''};
+const busy=value=>state.busy=value,openAssistant=()=>{},stopAnswer=()=>{},unlockAudio=()=>{},captureFrame=()=>null,status=()=>{},toast=()=>{},bookPath=x=>x;
+const addTurn=(role,text)=>turns.push({role,text}),$=()=>({value:''});
+const streamRequest=()=>new Promise((resolve,reject)=>pending.push({resolve,reject}));
+/* INTERRUPT */
+/* FUNCTION */
+(async()=>{const first=ask('first');interruptAnswer();const second=ask('second');
+/* COMPLETE OLD */
+await first;const during=state.busy;pending[1].resolve(true);await second;
+console.log(JSON.stringify({during,after:state.busy,turns}))})()
+'''.replace('/* INTERRUPT */',interrupt).replace('/* COMPLETE OLD */',
+        "pending[0].reject(new Error('old connection ended'));" if failed else 'pending[0].resolve(true);')
+    result=run_browser_function('ask',fixture)
+    assert result['during'] is True and result['after'] is False
+    assert result['turns']==[{'role':'user','text':'first'},{'role':'user','text':'second'}]

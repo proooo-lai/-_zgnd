@@ -1,0 +1,113 @@
+{
+  "date": "2026-11-22",
+  "base_commit": "6110f65",
+  "requirement_source": "user_relay_of_competition_supplement_formal_interface_pending",
+  "scope": [
+    "actual_video_text_location",
+    "pause_and_outline",
+    "pause_and_highlight",
+    "automatic_object_background_in_child_window"
+  ],
+  "offline": {
+    "command": ".venv/bin/python -m pytest -q",
+    "passed": 363,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 6,
+    "warning_scope": "existing_Starlette_httpx_and_PyMuPDF_deprecations",
+    "elapsed_seconds": 5.53,
+    "fixtures": "original_synthetic_only_no_competition_queries"
+  },
+  "checks": {
+    "pip_check": "passed",
+    "javascript_syntax": [
+      "web/app.js",
+      "web/video-annotations.js",
+      "web/object-agent.js"
+    ],
+    "git_diff_check": "passed"
+  },
+  "live_text": {
+    "source": "original_six_second_video_word_only_in_middle",
+    "tts_enabled": false,
+    "cases": [
+      {
+        "action": "locate_text",
+        "expected": "middle_frame",
+        "observed": "found_at_3_seconds_with_verified_box",
+        "server_ms": 4026
+      },
+      {
+        "action": "highlight_text",
+        "expected": "middle_frame",
+        "observed": "found_at_3_seconds_with_highlight_presentation",
+        "server_ms": 3899
+      },
+      {
+        "action": "locate_text",
+        "expected": "unconfirmed",
+        "observed": "unconfirmed_no_seek_no_boxes",
+        "server_ms": 776
+      }
+    ],
+    "measurement": "single_case_server_processing_not_official_accuracy_or_audible_latency"
+  },
+  "live_background": {
+    "source": "one_previously_authorized_existing_frozen_object",
+    "http_status": 200,
+    "server_ms": 10603,
+    "state": "unconfirmed",
+    "validation_reason": "uncertain_or_invalid_references",
+    "evidence_count": 0,
+    "model_calls": {
+      "chat": 1
+    },
+    "main_history_empty": true,
+    "is_successful_background_answer": false
+  },
+  "browser": {
+    "browser": "local_Google_Chrome_headless",
+    "source": "original_video_with_scripted_external_model_boundary",
+    "checks_passed": [
+      "pause_at_text_frame",
+      "outline",
+      "literal_yellow_highlight",
+      "manual_seek_clears",
+      "play_clears",
+      "layout_resize",
+      "interrupt_during_frame_loading_no_late_answer",
+      "automatic_child_background",
+      "main_history_unchanged",
+      "close_child"
+    ],
+    "page_errors": 0,
+    "screenshots": "local_ignored_artifacts_only"
+  },
+  "sampling": {
+    "max_candidate_scenes": 8,
+    "samples_per_scene": 3,
+    "max_independent_reviews": 3,
+    "search_timeout_seconds": 120,
+    "scope": "sampled_video_frames_not_exhaustive"
+  },
+  "new_video_submissions": 0,
+  "competition_queries_or_hidden_answers_read": false,
+  "not_verified": [
+    "another_authorized_book_full_cold_import_to_interaction",
+    "official_evaluation_adapter_and_thresholds",
+    "actual_microphone_to_speaker_audible_latency",
+    "full_video_fidelity",
+    "human_child_content_review"
+  ],
+  "limitations": [
+    "same_model_localization_and_review_can_share_bias",
+    "text_only_visible_between_sampled_frames_can_be_missed",
+    "generic_visual_object_identity_may_not_map_to_book_character",
+    "existing_full_book_quality_failure_not_promoted"
+  ],
+  "local_workbench": {
+    "idle_restart": true,
+    "new_background_route_loaded": true,
+    "frontend_resources_verified": 4
+  }
+}

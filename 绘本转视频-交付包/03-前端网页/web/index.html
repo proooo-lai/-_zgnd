@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#173f43">
   <title>纸书智伴 · 阅读工作台</title>
   <link rel="icon" href="/favicon.png" type="image/png">
-  <link rel="stylesheet" href="/style.css?v=82">
+  <link rel="stylesheet" href="/style.css?v=83">
 </head>
 <body>
   <div class="app-shell no-book">
@@ -42,7 +42,7 @@
         <div class="reading-layout">
           <section class="player-panel panel" aria-label="绘本视频播放器">
             <div class="book-sheet">
-            <div id="video-stage" class="video-stage" tabindex="0" role="group" aria-label="视频画面，点击对象可暂停并询问"><video id="book-video" preload="metadata" playsinline crossorigin="anonymous"></video><div id="boxes" class="boxes" aria-hidden="true"></div><div id="video-empty" class="video-empty"><span>▶</span><p>视频生成后，在这里开始阅读</p></div><div class="stage-caption" id="stage-caption">点一下画面，叫出对象小助手</div>
+            <div id="video-stage" class="video-stage" tabindex="0" role="group" aria-label="视频画面，点击对象可暂停并询问"><video id="book-video" preload="metadata" playsinline crossorigin="anonymous"></video><div id="located-video-frame" class="located-video-frame hidden"></div><div id="boxes" class="boxes" aria-hidden="true"></div><div id="video-text-boxes" class="video-text-boxes" aria-hidden="true"></div><div id="video-empty" class="video-empty"><span>▶</span><p>视频生成后，在这里开始阅读</p></div><div class="stage-caption" id="stage-caption">点一下画面，叫出对象小助手</div>
   <section id="object-agent" class="object-agent hidden" role="dialog" aria-modal="false" aria-labelledby="object-title">
     <header class="object-heading"><img id="object-avatar" class="object-avatar" alt="点选目标的画面" width="56" height="56"><div class="object-heading-copy"><span class="eyebrow">对象专属对话 · 子 Agent</span><h2 id="object-title">对象小助手</h2><p id="object-meta" class="small">基于点选画面和绘本证据回答</p></div><button id="object-close" class="icon-button" type="button" aria-label="关闭对象助手">×</button></header>
     <div id="object-history" class="object-history" role="log" aria-label="对象独立聊天记录" aria-live="polite"></div>
@@ -71,7 +71,8 @@
   <dialog id="settings-dialog"><form id="settings-form"><div class="dialog-heading"><div><span class="eyebrow">模型服务</span><h2>连接你自己的模型服务</h2></div><button type="button" id="close-settings" class="icon-button" aria-label="关闭设置">×</button></div><p class="section-help">配置仅存本机。密钥只用于服务端调用，保存后不回传浏览器。留空密钥保留原配置。服务商账号、区域和模型须已开通。提示词模板见项目 prompts/ 目录。</p><div id="provider-fields"></div><p class="section-help">本地或浏览器语音仅为联调备选，不能代表云端链路已验证。视频模型名称需按服务商控制台填写。</p><div class="dialog-actions"><span id="config-status" role="status"></span><button type="submit" class="button primary" id="save-settings">保存到本机</button></div></form></dialog>
   <div id="toast" class="toast hidden" role="alert"></div><audio id="response-audio" preload="auto"></audio>
   <script src="/language.js?v=2" defer></script>
-  <script src="/app.js?v=50" defer></script>
-  <script src="/object-agent.js?v=2" defer></script>
+  <script src="/video-annotations.js?v=2" defer></script>
+  <script src="/app.js?v=52" defer></script>
+  <script src="/object-agent.js?v=3" defer></script>
 </body>
 </html>

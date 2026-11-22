@@ -22,6 +22,12 @@ from .providers import ANSWER_CALLBACK, ANSWER_VOICE, ProviderError
 from .safety import UNTRUSTED_CONTENT_RULE, redact_privacy, safety_check
 from .schema import normalize_bbox, page_to_video_bbox, video_to_page_point, write_json
 from .video import run_process
+from .video_text import VideoTextLocator, maybe_text_request, resolve_text_request, text_action, validate_text_request
+
+
+LOCATION_INTENT = re.compile(
+    r"跳到|跳转|定位|框|圈出|高亮|标亮|在哪|哪里|查找|找(?:到|出|一下|一找|找)|第.{0,4}页|"
+    r"\b(?:find|locate|jump|seek|where|highlight)\b|show me|point to|go to", re.I)
 
 
 def tokens(text):
@@ -324,6 +330,16 @@ class Interactor:
             refers_to_selection = refers_to_selection or bool(re.match(r"^(?:在?干什么|在?做什么|怎么了|为什么|why\b|doing\b)", question, re.I))
         if safety_check(question)["blocked"]:
             return await self._finish(book, session_id, question, {"answer": "这个问题涉及危险内容。我们可以聊聊故事中的角色和安全的做法。", "uncertain": True}, started, turn_id, folder, input_kind)
+        if maybe_text_request(question):
+            try:
+                request = await resolve_text_request(self.provider, question)
+            except (ProviderError, TimeoutError):
+                return await self._finish(book, session_id, question, {
+                    "answer": "文字指令解析服务暂未完成。请把目标文字放在引号里再试。",
+                    "uncertain": True, "success": False, "status": "text_request_unconfirmed"
+                }, started, turn_id, folder, input_kind)
+            return await self._locate_video_text(book, request, timestamp, folder, session_id, question,
+                                                 started, turn_id, input_kind)
         story_followup = bool(refers_to_selection and re.search(
             r"干什么|做什么|怎么了|为什么|doing|happened|why", question, re.I)
             and not re.search(r"故事|书里|绘本|story|book|只.{0,8}画面|only.{0,20}(?:frame|picture|action)", question, re.I))
@@ -378,7 +394,11 @@ class Interactor:
         requires_frame = bool(re.search(
             r"(?:当前|现在|正在播放).{0,6}(?:画面|帧|视频)|这(?:一?帧|[张幅]图|[段个]视频)|(?:画面|视频|屏幕)[中里上内]|"
             r"\b(?:current|this)\s+(?:video|frame|picture|image|screen)\b|\bon (?:the|my) screen\b", question, re.I))
-        visual_question = visual_question or requires_frame or refers_to_selection
+        book_only = input_kind == "object_background"
+        visual_question = (visual_question or requires_frame or refers_to_selection) and not book_only
+        if book_only:
+            requires_frame = False
+            prompt += "\n本轮只介绍所选对象在原书中的背景。只能引用原书证据，不以当前视频或常识补写，不设置跳转或框选目标。"
         # A streamed draft is untrusted until all references and claims pass.
         context_token = ANSWER_CALLBACK.set(None)
         try:
@@ -392,7 +412,7 @@ class Interactor:
                 model = await self._validate_followup(book, model, question, folder, reference_context)
             else:
                 if not requires_frame or self.provider.available("vision"):
-                    model = await self._answer_model(book, scene, timestamp, folder, frame, ranked, prompt, question, visual_question)
+                    model = await self._answer_model(book, scene, timestamp, folder, frame, ranked, prompt, question, visual_question, book_only=book_only)
                 model = await self._validate_answer(book, model, question, folder, visual_question, requires_frame,
                     {**reference_context,
                      "prior_turns_for_reference_only": [{"question": t.get("question"), "answer": t.get("answer"),
@@ -408,6 +428,10 @@ class Interactor:
         finally:
             ANSWER_CALLBACK.reset(context_token)
         try:
+            if model.get("target_kind") == "word" and model.get("target_label") and LOCATION_INTENT.search(question):
+                request = validate_text_request({"action": text_action(question), "target_text": model["target_label"]}, question)
+                return await self._locate_video_text(book, request, timestamp, folder, session_id, question,
+                                                     started, turn_id, input_kind)
             answer = model["answer"]
             if not safety_check(answer)["blocked"]:
                 boundary = re.search(r"[。！？]|[.!?](?=\s|$)", answer)
@@ -425,6 +449,15 @@ class Interactor:
                     early_task.cancel()
                 await asyncio.gather(early_task, return_exceptions=True)
 
+    async def _locate_video_text(self, book, request, timestamp, folder, session_id, question, started, turn_id, input_kind):
+        if request:
+            result = await VideoTextLocator(self.provider, self.frame).search(book, request, timestamp, folder)
+        else:
+            result = {"answer": "请说出需要在视频中查找或高亮的具体文字，最好用引号括起来。",
+                      "uncertain": True, "success": False, "status": "text_target_required"}
+        # Return audio with the final result so the player can display the reviewed frame first.
+        return await self._finish(book, session_id, question, result, started, turn_id, folder, input_kind)
+
     async def _post_answer(self, book, model, folder, session_id, question, started, turn_id, input_kind, emit, early_task, delivery=None):
         numbers = model.get("evidence_pages", [])
         if not isinstance(numbers, list):
@@ -440,10 +473,7 @@ class Interactor:
             result.update(status="insufficient_evidence", success=False)
         seek_page = model.get("seek_page")
         target = str(model.get("target_label") or "")
-        wants_location = bool(re.search(
-            r"跳到|跳转|定位|框|圈出|在哪|哪里|找(?:到|出|一下|一找|找)|第.{0,4}页|"
-            r"\b(?:find|locate|jump|seek|where|highlight)\b|show me|point to|go to", question, re.I))
-        if not wants_location:
+        if not LOCATION_INTENT.search(question):
             seek_page, target = None, ""
         target_page = seek_page if isinstance(seek_page, int) and page_by_number(book, seek_page) else (valid_numbers[0] if valid_numbers and target else None)
         if target_page:
@@ -620,8 +650,15 @@ class Interactor:
                                  "method": "model_evidence_review_not_human_review", "review": verdict.model_dump()}
         return result
 
-    async def _answer_model(self, book, scene, timestamp, folder, frame, ranked, prompt, question, visual_question):
+    async def _answer_model(self, book, scene, timestamp, folder, frame, ranked, prompt, question, visual_question, book_only=False):
         book_id = book["id"]
+        if book_only:
+            if self.provider.available("chat"):
+                return await self.provider.chat(prompt)
+            if self.provider.available("vision"):
+                images = [self.store.directory(book_id) / "pages" / f"{p['number']:04}.png" for p in ranked[:3]]
+                return await self.provider.vision(prompt, images)
+            return None
         if frame:
             safe_frame(frame, folder / "frame.jpg")
         if self.provider.available("vision") and (visual_question or not self.provider.available("chat")):

@@ -100,6 +100,7 @@ class ObjectAgents:
                     image.thumbnail((180, 180))
                     image.convert("RGB").save(folder / "avatar.jpg", "JPEG")
                 context.update(status="ready", label=focus["label"], page_number=focus["page_number"],
+                               background_available=any(self.interactor.provider.available(name) for name in ("chat", "vision")),
                                focus_turn=result, avatar_url=f"/media/{book_id}/object_agents/{agent_id}/avatar.jpg")
                 write_json(folder / "context.json", context)
                 return {"agent": self.public(context), "result": result}
@@ -114,7 +115,8 @@ class ObjectAgents:
 
     @staticmethod
     def public(context):
-        return {key: context[key] for key in ("id", "session_id", "label", "time", "page_number", "avatar_url")}
+        return {**{key: context[key] for key in ("id", "session_id", "label", "time", "page_number", "avatar_url")},
+                "background_available": context.get("background_available", False)}
 
     def parameters(self, book_id, agent_id, parent):
         context = self.get(book_id, agent_id, parent)
@@ -126,6 +128,27 @@ class ObjectAgents:
     async def ask(self, book_id, agent_id, parent, request_id, question, **options):
         async with self.operation(book_id, agent_id, parent, request_id):
             return await self.interactor.ask(book_id, question, **self.parameters(book_id, agent_id, parent), **options)
+
+    async def background(self, book_id, agent_id, parent, request_id, voice=None):
+        async with self.operation(book_id, agent_id, parent, request_id):
+            context = self.get(book_id, agent_id, parent)
+            if context.get("background_result"):
+                return {**context["background_result"], "background_execution": "reused_same_object"}
+            question = ("请仅根据原书可定位的证据，介绍它在故事里的相关背景、情节和角色关系，并给出支持介绍的原书页码。"
+                        "不以外貌、百科常识或之前的介绍代替故事证据；对没有证据的经历、动机和身世明确说明无法确认，不要编造。")
+            result = await self.interactor.ask(book_id, question, **self.parameters(book_id, agent_id, parent),
+                                               input_kind="object_background", voice=voice)
+            result.update(background_state="supported" if not result.get("uncertain") and result.get("evidence") else "unconfirmed",
+                          background_execution="live")
+            self.store.update_turn(book_id, agent_id, result["turn_id"],
+                                   {key: result[key] for key in ("background_state", "background_execution")})
+            validation = result.get("evidence_validation", {})
+            reusable = validation.get("decision") == "supported" or validation.get("reason") in (
+                "uncertain_or_invalid_references", "evidence_does_not_support_answer")
+            if reusable:
+                context["background_result"] = result
+                write_json(self.directory(book_id, agent_id) / "context.json", context)
+            return result
 
     async def cancel(self, book_id, agent_id, parent, request_id):
         self.store.book(book_id)

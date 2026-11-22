@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
-PROVIDER_NAMES = ("vision", "chat", "asr", "tts", "video")
+PROVIDER_NAMES = ("vision", "interaction_vision", "chat", "asr", "tts", "video")
 PUBLIC_PROVIDER_FIELDS = ("kind", "base_url", "model", "voice")
 RUNTIME_FIELDS = ("concurrency", "max_pages", "target_duration", "width", "height", "fps")
 

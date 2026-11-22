@@ -114,6 +114,9 @@ def create_app(settings=None, provider=None):
     async def status():
         return {"version": "1.0.0", "configured": {name: provider.available(name) for name in ("vision", "chat", "asr", "tts", "video")},
                 "provider_modes": {name: provider.mode(name) for name in ("vision", "chat", "asr", "tts", "video")},
+                "interaction_vision": {"configured": interactor.provider.available("vision"),
+                                       "mode": interactor.provider.mode("vision"),
+                                       "source": getattr(interactor.provider, "vision_role", "vision")},
                 "ffmpeg": bool(settings.ffmpeg), "ffprobe": bool(settings.ffprobe),
                 "limits": {"min_duration": 100, "max_duration": 180, "min_fps": 24, "min_resolution": [1280, 720]},
                 "generation_busy": book_lock.locked(), "metrics_note": "浏览器播放事件仅作首音代理；实际两秒验收需声学回环测量"}

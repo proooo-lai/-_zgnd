@@ -45,3 +45,24 @@ console.log(JSON.stringify({title:children[0].children[0].text,button:children[0
     assert '00:00' not in result['title']
     assert result['button'] == '查看原书这一页 →'
     assert result['actions'] == [['page',7]]
+
+
+def test_optional_interaction_vision_can_be_configured_without_echoing_saved_key():
+    groups = next(line for line in APP.read_text().splitlines() if line.startswith('const PROVIDER_GROUPS='))
+    fixture = '''
+const elements={};
+const $=id=>elements[id]||(elements[id]={children:[],replaceChildren(){this.children=[]},append(...xs){this.children.push(...xs)}});
+const node=(tag,cls,text)=>({tag,className:cls,textContent:text,children:[],classList:{add(){}},append(...xs){this.children.push(...xs)}});
+/* GROUPS */
+/* FUNCTION */
+renderConfig({vision:{model:'original-import'},interaction_vision:{kind:'openai',model:'fast-model',base_url:'https://models.example/v1',has_key:true}});
+const inputs={};
+function walk(e){if(e.id)inputs[e.id]={value:e.value,placeholder:e.placeholder,type:e.type};for(const c of e.children||[])walk(c)}
+walk($('provider-fields'));console.log(JSON.stringify(inputs));
+'''.replace('/* GROUPS */', groups)
+    inputs = run_browser_function('renderConfig', fixture)
+    assert inputs['cfg-vision-model']['value'] == 'original-import'
+    assert inputs['cfg-interaction_vision-model']['value'] == 'fast-model'
+    assert inputs['cfg-interaction_vision-base_url']['value'] == 'https://models.example/v1'
+    assert inputs['cfg-interaction_vision-api_key']['value'] == ''
+    assert inputs['cfg-interaction_vision-api_key']['type'] == 'password'

@@ -1,0 +1,56 @@
+{
+  "date": "2026-11-22",
+  "scope": "Independent interaction vision and grounded selected-object followups; development checks, not official evaluation",
+  "models": {
+    "import_vision_unchanged": "gpt-5.6-sol",
+    "interaction_vision": "qwen3-vl-plus",
+    "chat": "deepseek-flash",
+    "asr": "qwen3-asr-flash",
+    "tts": "qwen3-tts-flash"
+  },
+  "configuration": {
+    "original_vision_preserved": true,
+    "local_private_backup_saved": true,
+    "private_config_mode": "0600",
+    "empty_optional_role_uses_original_vision": true,
+    "incomplete_explicit_role_is_unconfigured": true,
+    "credentials_in_report": false
+  },
+  "offline_verification": {
+    "command": ".venv/bin/python -m pytest -q",
+    "passed": 264,
+    "failed": 0,
+    "skipped": 0,
+    "dependency_deprecation_warnings": 6,
+    "javascript_syntax": "node --check web/app.js: passed",
+    "dependency_consistency": "pip check: no broken requirements",
+    "diff_whitespace": "git diff --check: passed",
+    "read_only_review": "reported issue fixed; final review found no additional confirmed issue"
+  },
+  "final_live_workbench_sequence": {
+    "transport": "HTTP/SSE through running localhost workbench",
+    "book_count": 1,
+    "source_evidence_pages": 12,
+    "existing_single_page_clip_reused": true,
+    "video_regenerated": false,
+    "question_source": "Developer-authored questions and synthetic speech, no competition queries or hidden answers",
+    "checks": [
+      {"kind": "touch_object", "server_roundtrip_ms": 6483, "expected_behavior_met": true, "answer_audio_complete": true},
+      {"kind": "text_selected_object_followup", "server_roundtrip_ms": 10585, "current_action_review": "supported", "book_background_review": "supported", "answer_audio_complete": true},
+      {"kind": "synthetic_voice_stream_followup", "server_roundtrip_ms": 11606, "transcription_matched_authored_question": true, "current_action_review": "supported", "book_background_review": "supported", "answer_audio_complete": true},
+      {"kind": "blank_touch", "server_roundtrip_ms": 2962, "expected_behavior_met": true, "recognized_object": false},
+      {"kind": "unsupported_fact", "server_roundtrip_ms": 2521, "expected_behavior_met": true, "answer_rejected": true, "accepted_evidence_count": 0}
+    ],
+    "returned_audio_download_and_pcm_lengths_checked": true,
+    "measurement": "Individual service processing/network roundtrips including answer audio, not audible latency",
+    "earlier_diagnostic_refusals_observed": true,
+    "diagnostic_notes": ["Uncited names were correctly blocked", "A visible static posture was incorrectly rejected; generic review rules clarified and the same candidate rechecked"]
+  },
+  "not_verified": [
+    "Actual browser microphone capture, speaker playback or acoustic latency",
+    "Repeated-run success rate, P50/P95, Recall@3 or official answer accuracy",
+    "End-to-end cold import and generation on a second unseen authorized book",
+    "Full-book video fidelity, designated human content-safety review or final competition latency threshold"
+  ],
+  "restricted_data_or_outputs_in_commit": false
+}

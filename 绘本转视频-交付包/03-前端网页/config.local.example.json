@@ -6,6 +6,12 @@
       "model": "gpt-5.6-sol",
       "api_key": "env:BOOK_VISION_API_KEY"
     },
+    "interaction_vision": {
+      "kind": "openai",
+      "base_url": "",
+      "model": "",
+      "api_key": "env:BOOK_INTERACTION_VISION_API_KEY"
+    },
     "chat": {
       "kind": "openai",
       "base_url": "https://api.deepseek.com/v1",

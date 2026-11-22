@@ -48,6 +48,7 @@ MiniMax 视频服务的开通入口与本机填写步骤见 [视频服务配置�
 | `storybook/video_text.py`、`video_objects.py`、`web/video-annotations.js` | 实际视频文字/物体核对、可定位帧记录、暂停框选/高亮及标注清理 |
 | `storybook/object_agents.py`、`web/object-agent.js` | 独立对象会话、自动原书背景、证据及同对象复用 |
 | `storybook/fidelity.py` | 显式诊断用原图细节保护试验；未接入默认生成或发布 |
+| `storybook/recovery.py` | 指纹校验后复用既有媒体，合成带配音的新书并披露替代动效 |
 | `storybook/providers.py` | 外部模型协议、超时、服务错误及视频任务 ID 记录 |
 | `storybook/server.py`、`storage.py` | HTTP 接口、任务状态、按书存储、历史及指标 |
 | `web/` | 导入、播放器、提问、点读及浏览器播放事件指标 |
@@ -73,6 +74,8 @@ MiniMax 视频服务的开通入口与本机填写步骤见 [视频服务配置�
 ```
 
 工具只接受原片任务成功且文件指纹匹配的既有运行；复核在独立 `artifacts/` 目录保存，不修改书库状态。保护区域有覆盖率上限，原片保留。缺少明确对齐结论、出现重影或错位的处理结果不能通过；诊断输出不是可发布作品。
+
+已有失败运行可通过 `tools/assemble_saved_book.py` 和私有指纹清单合成到新目录，复用核对后的视频及完整旁白，不再次提交生成任务。显式启用原图保真动效时，书库标为“混合动画 · 全书测试”，披露替代段落及人工待审状态；原失败运行保持原状。这不是网页自动续跑。字段、压缩旁白选择方式、命令及实测边界见 [全书配音恢复记录](docs/full-book-recovery-2026-11-22.md)。
 
 ## 验证
 

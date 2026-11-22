@@ -9,7 +9,7 @@ import re
 import shutil
 from pathlib import Path
 
-from .schema import contain_transform
+from .schema import contain_transform, sha256_file, write_json
 
 
 async def run_process(arguments: list[str], timeout: float = 600) -> bytes:
@@ -180,6 +180,52 @@ async def render_segment(image: Path, output: Path, duration: float, settings,
                   "-movflags", "+faststart", str(output)]
     await run_process(arguments, timeout=max(180, duration * 12))
     return transform
+
+
+async def render_source_motion(image: Path, output: Path, duration: float, settings) -> dict:
+    """Explicit local fallback: move the intact page inside a safe canvas.
+
+    This never claims to animate characters or to use a generative video model.
+    Unlike a zoom into the page, the bounded motion cannot crop source content.
+    Actual-frame grounding remains mandatory because its placement varies.
+    """
+    from PIL import Image
+    if not math.isfinite(duration) or duration <= 0 or output.exists() or image.resolve()==output.resolve():
+        raise ValueError('保真动效必须使用新输出路径和有效时长。')
+    with Image.open(image) as source:
+        iw,ih=source.size
+    width,height,fps=settings.width,settings.height,settings.fps
+    border=16
+    geometry=contain_transform(iw,ih,width-2*border,height-2*border)
+    _,_,cw,ch=geometry['content_rect']
+    left,top=(width-cw)//2,(height-ch)//2
+    amplitude=min(6,left-border/2,top-border/2)
+    if amplitude<0:
+        raise ValueError('保真动效画布没有安全边距。')
+    frames=max(1,round(duration*fps));actual_duration=frames/fps
+    filters=(f'[0:v]scale={cw}:{ch}:flags=lanczos,setsar=1[page];'
+        f'color=c=0xf4f1e9:s={width}x{height}:r={fps}:d={actual_duration:.9f}[canvas];'
+        f"[canvas][page]overlay=x='{left}+{amplitude}*sin(2*PI*t/{actual_duration:.9f})':"
+        f"y='{top}+{amplitude}*sin(2*PI*t/{actual_duration:.9f})':shortest=1,format=yuv420p[v]")
+    output.parent.mkdir(parents=True,exist_ok=True)
+    audit={'version':'source-preserved-motion-v1','status':'rendering','source_sha256':sha256_file(image),
+        'source_size':[iw,ih],'canvas_size':[width,height],'source_rect':[left,top,cw,ch],
+        'translation_amplitude_px':amplitude,'duration':actual_duration,'fps':fps,
+        'requires_frame_grounding':True,'generative_video_used':False,
+        'rendering':'source_preserved_motion','reason':'Explicit fallback preserves all source objects and text.'}
+    sidecar=output.with_suffix('.motion.json');write_json(sidecar,audit)
+    try:
+        await run_process([settings.ffmpeg,'-y','-hide_banner','-loglevel','error','-loop','1','-framerate',str(fps),
+            '-i',str(image),'-filter_complex_threads','1','-filter_complex',filters,'-map','[v]',
+            '-an','-frames:v',str(frames),'-c:v','libx264','-preset','veryfast','-crf','18',
+            '-threads','2','-movflags','+faststart',str(output)],timeout=max(180,duration*12))
+        if sha256_file(image)!=audit['source_sha256']:
+            raise ValueError('渲染期间原图已变化。')
+        audit.update(status='completed',output_sha256=sha256_file(output))
+    except BaseException:
+        audit['status']='failed';output.unlink(missing_ok=True);write_json(sidecar,audit);raise
+    write_json(sidecar,audit)
+    return audit
 
 
 async def concatenate_segments(segments: list[Path], output: Path, settings) -> dict:

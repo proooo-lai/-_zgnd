@@ -1,0 +1,99 @@
+{
+  "date": "2026-11-22",
+  "scope": "saved_12_page_authorized_book_recovery_not_cold_start_or_official_acceptance",
+  "automated": {
+    "command": ".venv/bin/python -m pytest -q --tb=short",
+    "passed": 388,
+    "failed": 0,
+    "skipped": 0,
+    "dependency_deprecation_warnings": 6,
+    "additional_checks": [
+      "git diff --check",
+      ".venv/bin/python -m pip check",
+      "node --check web/app.js",
+      "node --check web/video-annotations.js",
+      "node --check web/object-agent.js"
+    ]
+  },
+  "media": {
+    "scenes": 12,
+    "duration_seconds": 120.25,
+    "frames": 2886,
+    "width": 1280,
+    "height": 720,
+    "fps": 24,
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "audio_tracks": 1,
+    "full_decode": "passed",
+    "continuous_frame_timeline": true,
+    "original_narration_count": 12,
+    "decoded_audio_validation": {
+      "method": "10ms RMS envelope against original WAV; best offset searched +/-100ms",
+      "matched": 12,
+      "minimum_correlation": 0.999,
+      "maximum_absolute_offset_ms": 0.0,
+      "all_fit_scene": true,
+      "acoustic_listening": false
+    }
+  },
+  "rendering": {
+    "mode": "hybrid_test",
+    "reused_cloud_scenes": 7,
+    "source_preserved_motion_scenes": 5,
+    "source_motion_is_generative_character_animation": false,
+    "new_motion_sampled_consistent": 5,
+    "retained_original_needs_review": 3,
+    "new_paid_video_tasks": 1,
+    "regeneration_probe": "rejected",
+    "assembly_api_submissions": 0,
+    "single_pipeline_run": false,
+    "original_failed_run_unchanged": true,
+    "human_review": "pending"
+  },
+  "chrome": {
+    "actual_models": true,
+    "mocked_responses": false,
+    "page_errors": 0,
+    "playback_locations": 3,
+    "playback_progress_and_audio_signal": true,
+    "literal_highlight_with_original_punctuation": {
+      "found": true,
+      "paused": true,
+      "boxes": 1,
+      "timestamp": 37.2,
+      "elapsed_ms": 10187
+    },
+    "literal_highlight_without_punctuation": "not_confirmed",
+    "independent_object_assistant": {
+      "opened": true,
+      "main_history_unchanged": true,
+      "specific_character_identity_confirmed": false,
+      "background": "failed_connection_unknown_submission",
+      "answer_audio": "download_failed"
+    },
+    "tts_answer_audio": "download_failed_all_three_requests",
+    "unknown_submission_auto_retried": false,
+    "timing": "single_request_to_browser_result_not_acoustic_latency"
+  },
+  "review": {
+    "independent_read_only": true,
+    "actionable_findings": 1,
+    "resolved": "explicit_source_confined_fingerprinted_story_audio_paths_support_narration_compression_attempts",
+    "focused_recheck_passed": 17
+  },
+  "limitations": [
+    "human_full_film_review_pending",
+    "three_original_clips_uncertain",
+    "five_source_motion_segments_not_generative_character_animation",
+    "some_clips_hold_last_frame",
+    "partial_text_and_punctuation_matching",
+    "object_specific_identity_and_story_background_not_verified",
+    "interactive_answer_audio_failed",
+    "no_real_microphone_or_acoustic_loopback",
+    "no_second_book_cold_start",
+    "no_official_evaluation",
+    "same_model_review_may_share_bias"
+  ],
+  "restricted_data_committed": false
+}

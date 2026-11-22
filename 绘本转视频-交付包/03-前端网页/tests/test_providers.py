@@ -235,6 +235,108 @@ def test_minimax_lite_uses_supported_explicit_ratio(tmp_path, model, size, ratio
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("code,expected_code,expected_message", [
+    ("1008", "1008", "余额不足"),
+    ("AccessDenied", "AccessDenied", "权限"),
+    ("private-key-never-echo", None, "failed"),
+])
+def test_minimax_failed_task_preserves_safe_reason_without_resubmission(tmp_path, code, expected_code, expected_message):
+    async def scenario():
+        calls = []
+        def respond(request):
+            calls.append(request)
+            if request.method == "POST":
+                return httpx.Response(200, json={"task_id": "original-task"})
+            return httpx.Response(200, json={"task": {
+                "id": "original-task", "model": "MiniMax-H3-Lite", "status": "failed",
+                "error": {"code": code, "message": "private-key-never-echo"},
+                "created_at": 1, "updated_at": 2, "resolution": "768P", "duration": 5,
+                "usage": {}, "ratio": "16:9", "task_type": "image_to_video",
+            }})
+        provider = Provider(settings(tmp_path, video={**config("minimax"), "model": "MiniMax-H3-Lite"}))
+        await provider.client.aclose()
+        provider.client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        image, output = tmp_path / "original.png", tmp_path / "clip.mp4"
+        Image.new("RGB", (160, 90), "blue").save(image)
+        try:
+            with pytest.raises(ProviderError) as caught:
+                await provider.generate_clip(image, "Original authored scene.", output, 5)
+            assert expected_message in str(caught.value)
+            assert caught.value.code == expected_code
+            trace_text = output.with_suffix(".task.json").read_text()
+            trace = json.loads(trace_text)
+            assert trace["status"] == "failed"
+            assert trace["task_id"] == "original-task"
+            assert trace.get("error_code") == expected_code
+            assert "private-key-never-echo" not in trace_text + str(caught.value)
+            assert [request.method for request in calls] == ["POST", "GET"]
+        finally:
+            await provider.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("phase", ["submitting", "polling", "downloading"])
+def test_minimax_cancel_keeps_task_identity_or_marks_unknown_submission(tmp_path, phase):
+    async def scenario():
+        started = asyncio.Event()
+        calls = []
+        async def respond(request):
+            calls.append(request)
+            current = "submitting" if request.method == "POST" else ("downloading" if request.url.host == "media.example" else "polling")
+            if current == phase:
+                started.set()
+                await asyncio.Event().wait()
+            if request.method == "POST":
+                return httpx.Response(200, json={"task_id": "original-task"})
+            return httpx.Response(200, json={"task": {"id": "original-task", "status": "succeeded",
+                                                       "content": {"url": "https://media.example/clip.mp4"}}})
+        provider = Provider(settings(tmp_path, video={**config("minimax"), "model": "MiniMax-H3-Lite"}))
+        await provider.client.aclose()
+        provider.client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        image, output = tmp_path / "original.png", tmp_path / "clip.mp4"
+        Image.new("RGB", (160, 90), "blue").save(image)
+        task = asyncio.create_task(provider.generate_clip(image, "Original authored scene.", output, 5))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            trace = json.loads(output.with_suffix(".task.json").read_text())
+            assert trace["status"] == ("submission_unconfirmed" if phase == "submitting" else "submitted")
+            assert trace["task_id"] == (None if phase == "submitting" else "original-task")
+            assert sum(request.method == "POST" for request in calls) == 1
+            assert not output.exists()
+            assert not list(tmp_path.glob("*.download"))
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            await provider.close()
+    asyncio.run(scenario())
+
+
+def test_minimax_missing_task_id_leaves_unknown_submission_for_console_check(tmp_path):
+    async def scenario():
+        calls = []
+        def respond(request):
+            calls.append(request)
+            return httpx.Response(200, json={"task_id": None})
+        provider = Provider(settings(tmp_path, video={**config("minimax"), "model": "MiniMax-H3-Lite"}))
+        await provider.client.aclose()
+        provider.client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        image, output = tmp_path / "original.png", tmp_path / "clip.mp4"
+        Image.new("RGB", (160, 90), "blue").save(image)
+        try:
+            with pytest.raises(ProviderError) as caught:
+                await provider.generate_clip(image, "Original authored scene.", output, 5)
+            assert caught.value.submission_state == "submission_unconfirmed"
+            assert json.loads(output.with_suffix(".task.json").read_text())["status"] == "submission_unconfirmed"
+            assert len(calls) == 1
+        finally:
+            await provider.close()
+    asyncio.run(scenario())
+
+
 def test_http_error_and_redirect_never_echo_credentials(tmp_path):
     async def scenario():
         for status in (401, 500, 302):

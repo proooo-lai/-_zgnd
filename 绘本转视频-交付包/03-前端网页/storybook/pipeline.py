@@ -485,7 +485,17 @@ async def build_book(pdf_path: Path, book_dir: Path, provider, settings,
         speech_complete = 0
         if provider.available("tts"):
             await report(0.40, "开始逐页合成旁白", "Speech", attempt=narration_attempt + 1)
-            await asyncio.gather(*(speak(i, s) for i, s in enumerate(scenes)))
+            speech_tasks = [asyncio.create_task(speak(i, s)) for i, s in enumerate(scenes)]
+            try:
+                await asyncio.gather(*speech_tasks)
+            except BaseException:
+                # Do not submit queued speech or write progress after the run
+                # becomes terminal. Completed WAVs remain available for review.
+                for task in speech_tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*speech_tasks, return_exceptions=True)
+                raise
             if any(path is None for path in audio_paths):
                 warnings.append("部分页面没有可确认的原文或旁白，因此没有配音。")
         else:

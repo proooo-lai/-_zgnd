@@ -133,6 +133,26 @@ def test_cancel_stream_cleans_partial_and_preserves_prior_output(tmp_path):
     asyncio.run(run())
 
 
+def test_stream_timeout_records_unknown_submission_without_a_second_request(tmp_path):
+    async def run():
+        calls = []
+        def respond(request):
+            calls.append(request)
+            raise httpx.ReadTimeout("private service details", request=request)
+        provider = await make_provider(tmp_path, respond)
+        try:
+            with pytest.raises(ProviderError) as caught:
+                await provider.tts_stream("Original authored text.", "en", tmp_path / "answer.wav", None)
+            assert caught.value.submission_state == "submission_unconfirmed"
+            assert "private service details" not in str(caught.value)
+            assert len(calls) == 1
+            assert not (tmp_path / "answer.wav").exists()
+            assert not list(tmp_path.glob("*.partial"))
+        finally:
+            await provider.close()
+    asyncio.run(run())
+
+
 def test_long_text_segments_keep_global_index_and_all_pcm(tmp_path):
     async def run():
         sent, chunks = [], []

@@ -556,7 +556,8 @@ class Provider:
             temporary.replace(out)
             return out
         except httpx.RequestError:
-            raise ProviderError("流式语音连接中断；提交是否已接收未知，未自动重试") from None
+            raise ProviderError("流式语音连接中断；提交是否已接收未知，未自动重试",
+                                submission_state="submission_unconfirmed") from None
         finally:
             temporary.unlink(missing_ok=True)
 
@@ -735,13 +736,20 @@ try {
         try:
             response = await self._request("POST", base + "/v2/video_generation", config, json=payload)
             result = response_object(response)
-        except ProviderError as exc:
-            provenance.update(status=exc.submission_state or "submission_unconfirmed", error=str(exc))
+            task_id = result.get("task_id") or (result.get("task") or {}).get("id")
+            if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", task_id):
+                raise ProviderError("MiniMax 未返回有效 task_id，未自动重复提交，请到控制台核对任务记录",
+                                    submission_state="submission_unconfirmed")
+        except asyncio.CancelledError:
+            # Cancellation cannot prove a paid submission was rejected.
+            provenance.update(status="submission_unconfirmed", error="本地提交被中断；请到控制台核对任务记录")
             provenance_path.write_text(json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8")
             raise
-        task_id = result.get("task_id") or (result.get("task") or {}).get("id")
-        if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", task_id):
-            raise ProviderError("MiniMax 未返回有效 task_id，未自动重复提交，请到控制台核对任务记录")
+        except ProviderError as exc:
+            provenance.update(status=exc.submission_state or "submission_unconfirmed", error=str(exc),
+                              error_code=exc.code, http_status=exc.status_code)
+            provenance_path.write_text(json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8")
+            raise
         provenance.update(task_id=task_id, status="submitted")
         provenance_path.write_text(json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8")
         deadline = time.monotonic() + 1200
@@ -759,9 +767,17 @@ try {
                 provenance_path.write_text(json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8")
                 return out
             if status in ("failed", "cancelled"):
-                provenance.update(status=status, completed_at=time.time())
+                error = task.get("error")
+                if isinstance(error, dict) and error.get("code") in ("1008", 1008):
+                    reason = ProviderError("视频服务余额不足；请补足当前服务账号的额度后再继续", code="1008")
+                else:
+                    reason = service_error(body={"error": error})
+                message = f"MiniMax 视频任务 {task_id} 状态：{status}"
+                if reason.code:
+                    message += "；" + str(reason)
+                provenance.update(status=status, completed_at=time.time(), error=message, error_code=reason.code)
                 provenance_path.write_text(json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8")
-                raise ProviderError(f"MiniMax 视频任务 {task_id} 状态：{status}")
+                raise ProviderError(message, code=reason.code)
             await asyncio.sleep(4)
         provenance.update(status="poll_timeout", completed_at=time.time())
         provenance_path.write_text(json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8")

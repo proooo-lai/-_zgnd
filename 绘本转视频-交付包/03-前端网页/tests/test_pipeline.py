@@ -72,6 +72,40 @@ def test_vision_page_failure_cancels_and_joins_sibling_requests(tmp_path):
     asyncio.run(scenario())
 
 
+def test_narration_failure_cancels_and_joins_siblings_before_returning(tmp_path):
+    document = pymupdf.open()
+    for _ in range(2):
+        document.new_page(width=160, height=90).insert_text((10, 20), "Original narration.")
+    source = tmp_path / "original.pdf"
+    document.save(source)
+    document.close()
+
+    async def scenario():
+        sibling_started, sibling_stopped = asyncio.Event(), asyncio.Event()
+
+        class Speech:
+            def available(self, name):
+                return name == "tts"
+
+            async def tts(self, text, language, output):
+                if output.stem == "0001":
+                    await sibling_started.wait()
+                    raise ProviderError("Speech connection interrupted")
+                sibling_started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    sibling_stopped.set()
+
+        settings = Settings(data_dir=tmp_path / "data", config_file=tmp_path / "absent.json", concurrency=2)
+        with pytest.raises(ProviderError, match="Speech connection interrupted"):
+            await build_book(source, tmp_path / "run", Speech(), settings)
+        assert sibling_stopped.is_set(), "Failed narration must stop and join queued speech before returning"
+        events = json.loads((tmp_path / "run/agents/events.json").read_text())
+        assert all(event["agent"] != "Video" for event in events)
+    asyncio.run(scenario())
+
+
 def test_pdf_extraction_preserves_pages_words_and_official_objects(tmp_path):
     document = pymupdf.open()
     page = document.new_page(width=600, height=400)

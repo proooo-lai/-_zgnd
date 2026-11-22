@@ -121,6 +121,9 @@ def test_invalid_audio_is_client_error_not_internal_server_failure(tmp_path):
 
 def test_voice_answer_failure_cleans_audio_without_claiming_a_completed_turn(tmp_path):
     class FailingAnswerProvider(OfflineProvider):
+        async def asr(self, audio):
+            await super().asr(audio)
+            return 'Tell me about the bird'
         async def chat(self, prompt):
             raise ProviderError("问答服务暂不可用")
     app = create_app(settings_for(tmp_path), FailingAnswerProvider())

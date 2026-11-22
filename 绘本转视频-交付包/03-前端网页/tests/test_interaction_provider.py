@@ -34,6 +34,8 @@ def test_fast_vision_only_changes_interaction_requests(tmp_path):
             seen.append(payload["model"])
             result = {"found": True, "label": "小鸟", "description": "小鸟站在这里。",
                       "coordinate_space": "full_frame", "bbox_1000": [400, 300, 650, 800], "confidence": .9}
+            if 'CLICK_PIXEL_REVIEW_V1' in json.dumps(payload):
+                result = {'supported': True, 'uncertain': False, 'reason': 'Synthetic pixel verification.'}
             return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(result)}}]})
         await provider.client.aclose()
         provider.client = httpx.AsyncClient(transport=httpx.MockTransport(reply))
@@ -48,7 +50,7 @@ def test_fast_vision_only_changes_interaction_requests(tmp_path):
             result = await Interactor(store, provider, settings).touch(
                 "synthetic", .47, .55, 10, "s1", encoded_frame())
             assert result["object"]["label"] == "小鸟" and result["uncertain"] is False
-            assert seen == ["import-quality", "fast-interaction"]
+            assert seen == ["import-quality", "fast-interaction", "fast-interaction"]
         finally:
             await provider.close()
     asyncio.run(run())

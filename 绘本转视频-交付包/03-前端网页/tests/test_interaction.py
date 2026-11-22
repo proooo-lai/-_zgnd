@@ -41,6 +41,8 @@ class ScriptedProvider:
         return self.replies.pop(0)
 
     async def vision(self, prompt, images):
+        if 'CLICK_PIXEL_REVIEW_V1' in prompt:
+            return {'supported':True,'uncertain':False,'reason':'Original synthetic fixture explicitly permits this candidate.'}
         self.calls.append({"prompt": prompt, "images": list(images),
                            "first_pixel": Image.open(images[0]).convert("RGB").getpixel((0, 0))})
         return self.replies.pop(0)
@@ -117,7 +119,7 @@ def test_generated_video_click_uses_actual_uploaded_frame_not_old_pdf_boxes(setu
     assert provider.calls[0]["first_pixel"][2] < 20
 
 
-def test_video_touch_context_keeps_names_but_excludes_source_geometry(setup):
+def test_video_touch_uses_only_actual_pixels_without_source_names_or_geometry(setup):
     store, settings = setup
     book = make_book(store, generated=True)
     book["pages"][0]["objects"][1]["geometry"] = {"polygon": [[.25, .5], [.45, .7]]}
@@ -125,9 +127,8 @@ def test_video_touch_context_keeps_names_but_excludes_source_geometry(setup):
     provider = ScriptedProvider([{"found": True, "label": "apple", "description": "It is red.",
                                  "coordinate_space": "full_frame", "bbox_1000": [380, 450, 580, 700], "confidence": .95}], enabled=("vision",))
     result = asyncio.run(Interactor(store, provider, settings).touch("synthetic", .46, .55, 12, "s1", encoded_frame()))
-    context = json.loads(provider.calls[0]["prompt"].rsplit("\n", 1)[1].split("：", 1)[1])
-    assert any(item.get("label") == "apple" and item.get("label_zh") == "苹果" for item in context["objects"])
-    assert all(set(item) <= {"label", "label_zh", "label_en"} for item in context["objects"])
+    prompt = provider.calls[0]['prompt']
+    assert all(value not in prompt for value in ['苹果','apple','geometry','polygon','tree scene'])
     assert result["boxes"][0]["bbox"] == [.38, .45, .2, .25]
 
 

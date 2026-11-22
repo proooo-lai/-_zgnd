@@ -27,8 +27,9 @@ window.VideoAnnotations = (() => {
       });
     }
     function validate(result, book) {
-      const location = result?.text_location;
-      if (!book || location?.status !== "found" || !["locate_text","highlight_text"].includes(location.action)
+      const object = result?.object_location?.status === "found";
+      const location = object ? result.object_location : result?.text_location;
+      if (!book || location?.status !== "found" || !(object ? location.action === "locate_object" : ["locate_text","highlight_text"].includes(location.action))
           || !finite(location.timestamp) || location.timestamp < 0 || result.seek_time !== location.timestamp
           || !Array.isArray(location.frame_size) || location.frame_size.length !== 2
           || !location.frame_size.every(n => Number.isInteger(n) && n > 0 && n <= 12000)
@@ -36,12 +37,12 @@ window.VideoAnnotations = (() => {
       let url;
       try { url = new URL(location.frame_url, window.location.href); } catch { return null; }
       if (url.origin !== window.location.origin || !url.pathname.startsWith("/media/"+encodeURIComponent(book)+"/turns/")
-          || !/\/text-location\/[^/]+\.png$/.test(url.pathname)) return null;
+          || !(object ? /\/object-location\/[^/]+\.png$/ : /\/text-location\/[^/]+\.png$/).test(url.pathname)) return null;
       const presentation = location.action === "highlight_text" ? "highlight" : "outline";
       const boxes = result.boxes;
       if (!Array.isArray(boxes) || !boxes.length || !boxes.every(box => {
         const b = box.bbox;
-        return box.kind === "text" && box.source === "verified_video_frame" && box.presentation === presentation
+        return box.kind === (object ? "object" : "text") && box.source === "verified_video_frame" && box.presentation === presentation
           && Array.isArray(b) && b.length === 4 && b.every(finite) && b[0] >= 0 && b[1] >= 0 && b[2] > 0 && b[3] > 0
           && b[0]+b[2] <= 1.000001 && b[1]+b[3] <= 1.000001;
       })) return null;
@@ -56,7 +57,7 @@ window.VideoAnnotations = (() => {
       const left = (rect.width-width)/2, top = (rect.height-height)/2;
       for (const box of active.boxes) {
         const [x,y,bw,bh] = box.bbox, element = document.createElement("div");
-        element.className = "video-text-"+active.presentation; element.title = box.label || active.location.target_text;
+        element.className = "video-text-"+active.presentation; element.title = box.label || active.location.target_text || active.location.target_label;
         Object.assign(element.style,{left:left+x*width+"px",top:top+y*height+"px",width:bw*width+"px",height:bh*height+"px"});
         layer.append(element);
       }

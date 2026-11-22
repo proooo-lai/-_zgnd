@@ -142,12 +142,12 @@ async function accept(result,context,skipAudio=false){
   const current=()=>epoch===state.requestEpoch&&book===state.book?.id&&session===state.session&&!state.interrupted;
   if(!current())return;
   if(result&&result.transcript)Language.noteHeard(result.transcript);
-  const located=result.text_location?.status==="found";
+  const located=result.text_location?.status==="found"||result.object_location?.status==="found";
   if(located){
     window.ObjectAssistant?.close(false);state.boxes=[];drawBoxes();
     const displayed=typeof videoAnnotations!=="undefined"&&await videoAnnotations?.apply(result);
     if(!current())return;
-    if(!displayed){stopAnswer();skipAudio=true;result={...result,answer:"播放器未能完成目标文字的暂停和标注，本轮未完成，请重试。",uncertain:true,success:false,status:"text_display_failed",audio_url:null,audio_chunks:[],boxes:[]};}
+    if(!displayed){stopAnswer();skipAudio=true;result={...result,answer:"播放器未能完成目标的暂停和标注，本轮未完成，请重试。",uncertain:true,success:false,status:"location_display_failed",audio_url:null,audio_chunks:[],boxes:[]};}
   }else if(typeof videoAnnotations!=="undefined")videoAnnotations?.clear();
   const rendered=renderAssistant(result);
   if(rendered.warning){state.interactionWarning=rendered.warning;status("");}

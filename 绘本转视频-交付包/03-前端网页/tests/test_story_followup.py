@@ -205,7 +205,7 @@ def test_optional_story_text_is_not_exposed_when_it_was_not_validated(tmp_path):
     seed_story(store)
     provider = StoryPartsProvider({"answer": "未经复核的额外内容", "evidence_pages": [7], "uncertain": False})
     result = asyncio.run(Interactor(store, provider, SimpleNamespace()).ask(
-        "synthetic", "苹果在哪里？", "s1", 10))
+        "synthetic", "故事里苹果在哪里？", "s1", 10))
     assert result["answer"] == "苹果在树下。"
     assert not result.get("story_context")
 
@@ -220,7 +220,7 @@ def test_review_service_failure_is_distinct_from_missing_story_evidence(tmp_path
                 raise ProviderError("Temporary service failure")
             return await super().chat(prompt)
     result = asyncio.run(Interactor(store, UnavailableReview(), SimpleNamespace()).ask(
-        "synthetic", "苹果在哪里？", "s1", 10))
+        "synthetic", "故事里苹果在哪里？", "s1", 10))
     assert result["uncertain"] is True and result["success"] is False
     assert "复核服务" in result["answer"]
     assert result["evidence_validation"]["reason"] == "verifier_unavailable_or_invalid"

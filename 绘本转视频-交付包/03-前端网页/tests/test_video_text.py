@@ -131,8 +131,9 @@ def test_word_navigation_never_speaks_an_unlocated_story_draft(tmp_path,monkeypa
         return {'answer':'The sampled video frames do not confirm the word.','uncertain':True,'boxes':[],'evidence':[]}
     async def emit(*args): pass
     monkeypatch.setattr(VideoTextLocator,'search',miss)
-    result=asyncio.run(Interactor(store,provider,SimpleNamespace()).ask('synthetic','Where is apple?','main',emit=emit))
+    result=asyncio.run(Interactor(store,provider,SimpleNamespace()).ask('synthetic','Jump to apple','main',emit=emit))
     assert spoken==[result['answer']]
+    assert result['answer']=='The sampled video frames do not confirm the word.'
 
 
 def test_fallback_cannot_search_a_word_the_user_never_requested(tmp_path,monkeypatch):
@@ -143,7 +144,7 @@ def test_fallback_cannot_search_a_word_the_user_never_requested(tmp_path,monkeyp
     store=Store(tmp_path);make_book(store,generated=True)
     provider=ScriptedProvider([{'answer':'Here is the apple.','evidence_scope':'book','evidence_pages':[1],
         'uncertain':False,'seek_page':1,'target_label':'banana','target_kind':'word'}])
-    result=asyncio.run(Interactor(store,provider,SimpleNamespace()).ask('synthetic','Where is apple?','main'))
+    result=asyncio.run(Interactor(store,provider,SimpleNamespace()).ask('synthetic','Jump to apple','main'))
     assert not calls and result['uncertain'] and 'seek_time' not in result
 
 

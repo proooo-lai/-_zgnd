@@ -1,0 +1,86 @@
+{
+  "date": "2026-11-22",
+  "scope": "real_video_recognition_repair_not_full_book_acceptance",
+  "automated": {
+    "command": ".venv/bin/python -m pytest -q --tb=short",
+    "passed": 375,
+    "failed": 0,
+    "skipped": 0,
+    "dependency_deprecation_warnings": 6,
+    "additional_checks": [
+      "git diff --check",
+      "node --check web/app.js",
+      "node --check web/video-annotations.js",
+      ".venv/bin/python -m pip check"
+    ]
+  },
+  "live_validation": {
+    "source": "existing_authorized_single_scene_video_and_self_authored_inputs_no_competition_queries",
+    "video_seconds": 5.167,
+    "video_size": [
+      1344,
+      768
+    ],
+    "book_evidence_pages": 12,
+    "video_scene_count": 1,
+    "production_click_sample": {
+      "actual_model": true,
+      "tts_enabled": false,
+      "object_points": 3,
+      "recognized": 3,
+      "blank_points": 1,
+      "blank_rejected": 1,
+      "latency_ms": [
+        6691,
+        6742,
+        7988,
+        2220
+      ],
+      "scope": "four_development_points_not_accuracy_estimate"
+    },
+    "chrome_actual_services": {
+      "text_object_navigation": {
+        "paused": true,
+        "verified_overlay": true,
+        "ms": 7672
+      },
+      "literal_text_highlight": {
+        "paused": true,
+        "verified_overlay": true,
+        "ms": 11236
+      },
+      "pointer_click": {
+        "object_window_ready": true,
+        "grounded_story_background_returned": true,
+        "main_history_unchanged": true
+      },
+      "audio_upload_navigation": {
+        "source": "tts_authored_question_not_microphone",
+        "asr_matches_authored_query": true,
+        "paused": true,
+        "verified_overlay": true,
+        "ms": 8419
+      },
+      "browser_page_errors": 0,
+      "model_responses_mocked": false
+    },
+    "new_video_tasks": 0,
+    "restricted_raw_artifacts_committed": false
+  },
+  "review": {
+    "read_only_review_completed": true,
+    "actionable_findings": 1,
+    "resolved": "Show me and Point to synonyms now use verified actual-video object navigation"
+  },
+  "limitations": [
+    "single_existing_video_only",
+    "sampled_search_not_exhaustive",
+    "same_model_review_may_share_bias",
+    "no_actual_microphone_or_acoustic_latency_test",
+    "no_second_book_cold_start",
+    "no_official_evaluation",
+    "full_book_video_fidelity_still_blocked",
+    "human_content_review_pending"
+  ],
+  "timing_measurement": "single_run_processing_or_browser_result_proxy_not_audible_latency_or_p50_p95"
+}

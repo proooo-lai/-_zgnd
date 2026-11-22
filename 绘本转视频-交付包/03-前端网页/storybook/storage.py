@@ -96,10 +96,10 @@ class Store:
             if IDENTIFIER.fullmatch(turn_id):
                 folder = directory / turn_id
                 if folder.is_dir():
-                    for file in folder.iterdir():
-                        if file.is_file():
-                            file.unlink()
-                    folder.rmdir()
+                    if folder.is_symlink():
+                        folder.unlink()
+                    else:
+                        shutil.rmtree(folder)
 
     def metric(self, event):
         with self.connect() as connection:

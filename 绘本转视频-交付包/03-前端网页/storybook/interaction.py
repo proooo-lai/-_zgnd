@@ -16,13 +16,14 @@ from PIL import Image
 from pydantic import ValidationError
 
 from .answer_validation import AnswerDraft, EvidenceVerdict, VERIFIER_VERSION
-from .grounding import ClickObservation, make_click_context, pointed_frame
+from .grounding import ClickObservation, PixelVerdict, click_pixel_detail, mark_click, pointed_frame
 from .followup import draft_followup, joined
 from .providers import ANSWER_CALLBACK, ANSWER_VOICE, ProviderError
 from .safety import UNTRUSTED_CONTENT_RULE, redact_privacy, safety_check
 from .schema import normalize_bbox, page_to_video_bbox, video_to_page_point, write_json
 from .video import run_process
 from .video_text import VideoTextLocator, maybe_text_request, resolve_text_request, text_action, validate_text_request
+from .video_objects import VideoObjectLocator, object_request
 
 
 LOCATION_INTENT = re.compile(
@@ -340,6 +341,10 @@ class Interactor:
                 }, started, turn_id, folder, input_kind)
             return await self._locate_video_text(book, request, timestamp, folder, session_id, question,
                                                  started, turn_id, input_kind)
+        target = object_request(question)
+        if target and not focus_turn:
+            result = await VideoObjectLocator(self.provider, self.frame).search(book, target, timestamp, folder)
+            return await self._finish(book, session_id, question, result, started, turn_id, folder, input_kind)
         story_followup = bool(refers_to_selection and re.search(
             r"干什么|做什么|怎么了|为什么|doing|happened|why", question, re.I)
             and not re.search(r"故事|书里|绘本|story|book|只.{0,8}画面|only.{0,20}(?:frame|picture|action)", question, re.I))
@@ -762,33 +767,29 @@ class Interactor:
         # Generated footage always uses the actual clicked frame, never original-page boxes.
         if not match and self.provider.available("vision"):
             image = await self.frame(book, timestamp, folder / "frame.jpg", frame)
-            images, click_transform = make_click_context(image, folder, x, y)
-            # Source-page geometry is not valid in generated footage. Sending
-            # it as context can cause the model to copy an obsolete box even
-            # when it receives the actual frame; only names help identification.
-            source_names = [{key: obj.get(key, "") for key in ("label", "label_zh", "label_en")}
-                            for obj in page.get("objects", []) if isinstance(obj, dict)]
-            prompt = (UNTRUSTED_CONTENT_RULE + f'\n识别当前视频帧归一化点击坐标({x:.5f},{y:.5f})指向的最小独立语义对象。'
-                '第一张为原始视频帧，第二张仅叠加红色空心圆和十字，十字中心就是点击点。'
-                '第三张是点击附近的局部放大原图，第四张是同一局部的标记图；请优先观察局部十字中心，再用整帧核对身份。'
-                '只识别中心覆盖的对象；标记本身不是物体，原帧用于核对被标记遮挡的细节。'
-                '不要将整幅图或邻近但未点击的对象当目标。遮挡、背景、空白或看不清就found=false。不要只根据原书对象猜测。'
-                'label使用可观察的类别和外观消歧（如穿某色衣服的小女孩），不要猜测人物姓名或身份。'
-                'description只写静态可见特征，不猜动作、意图或故事情节；动作和故事关联留待有证据的追问回答。'
-                '\n输出JSON {"found":true,"label":"对象名称","description":"面向儿童的一句可见事实，不提红色标记或坐标",'
-                '"coordinate_space":"crop","bbox_1000":[左,上,右,下],"confidence":0.9}。'
-                '优先用crop坐标，bbox_1000为第三/四张局部图的0到1000整数端点；'
-                '若完整对象超出局部边界，则用整帧定位并明确coordinate_space="full_frame"，不得把裁剪边界当完整对象。'
-                '右和下是边界位置，不能填宽高，也不能填0到1小数。found=false时bbox_1000=[]。'
-                + '\n局部到整帧变换（仅供核对）：' + json.dumps(click_transform, ensure_ascii=False)
-                + "\n上下文仅供辨认名字：" + json.dumps({"objects": source_names}, ensure_ascii=False))
+            marked = mark_click(image, folder / 'click-reference.png', x, y)
+            images = [image, marked]
+            with Image.open(image) as original:
+                click_transform = {'version':'click-full-frame-v2','frame_size':list(original.size),
+                                   'coordinate_space':'full_frame'}
+            prompt = (UNTRUSTED_CONTENT_RULE + '\nCLICK_FULL_FRAME_V2：识别红色空心圆十字中心指向的物体。'
+                '两张图是同一整幅视频帧，第一张未标记，第二张仅标记点选位置。'
+                f'点击点为整帧归一化({x},{y})。只识别十字中心实际覆盖的对象，不选邻近对象。'
+                '如果中心在留白、纯背景或看不清，found=false。标记不是目标。不猜角色姓名。'
+                '描述不能包含红色标记、十字、坐标或点击点，它们只用于定位。'
+                'label写简短可见类别（整个人物、动物或物品，不只眼睛等局部）；description只写可观察静态特征，不写动作或猜想。'
+                '本次没有裁剪图。所有框只相对整幅图；禁止把框变成点击点的小框。'
+                '只返回JSON {"found":true,"label":"名称","description":"描述","coordinate_space":"full_frame",'
+                '"bbox_1000":[左上x,左上y,右下x,右下y],"confidence":0.9}。坐标0到1000整数端点，false时bbox_1000=[]。')
             raw = await self.provider.vision(prompt, images)
             try:
                 observation = ClickObservation.model_validate(raw)
             except ValidationError:
                 observation = ClickObservation(found=False,coordinate_space='full_frame')
-            bbox = observation.video_box(click_transform)
+            bbox = observation.video_box() if observation.coordinate_space == 'full_frame' else None
             obj = observation.model_dump(exclude={"bbox_1000", "coordinate_space"})
+            if re.search(r'标记|十字|点击|坐标|crosshair|marker|click point',obj.get('description',''),re.I):
+                obj['description'] = ''
             obj["bbox"] = bbox
             contains = bbox and bbox[0] - 0.015 <= x <= bbox[0] + bbox[2] + 0.015 and bbox[1] - 0.015 <= y <= bbox[1] + bbox[3] + 0.015
             confidence = observation.confidence
@@ -798,13 +799,32 @@ class Interactor:
                 audit_raw = raw
             except (ValueError,TypeError):
                 audit_raw = {'invalid_json_value':True}
-            write_json(folder / 'click-grounding.json', {'version':'click-crop-v1', 'transform':click_transform,
-                'model_result':audit_raw, 'frame_bbox':bbox, 'accepted':bool(obj.get('found') and contains and confident)})
-            if obj.get("found") and contains and confident:
+            accepted = bool(obj.get('found') and contains and confident)
+            review = None
+            if accepted:
+                detail = click_pixel_detail(image, folder/'click-pixel-detail.png', x, y)
+                review_prompt = (UNTRUSTED_CONTENT_RULE + '\nCLICK_PIXEL_REVIEW_V1 独立核对点选识别，候选答案不是证据。'
+                    '第一张整幅原帧，第二张同尺寸点击标记，第三张仅是点击点周围很小区域的未标记像素放大，不用于定位坐标。'
+                    '判断点击点本身是否真实落在候选对象上，以及候选框是否包围该对象；不能因为别处有同类就通过。'
+                    '点在白色留白、纯背景或对象外侧必须supported=false，即便候选框刻意包住点击点也不能通过。'
+                    '只返回JSON {"supported":true,"uncertain":false,"reason":"像素依据"}。看不清则uncertain=true。\n'
+                    + json.dumps({'candidate':audit_raw,'point':[x,y]},ensure_ascii=False))
+                try:
+                    verdict = PixelVerdict.model_validate(await self.provider.vision(review_prompt,[image,marked,detail]))
+                    review = verdict.model_dump()
+                    accepted = verdict.supported and not verdict.uncertain
+                except (ProviderError, ValidationError):
+                    accepted = False
+                    review = {'supported':False,'uncertain':True,'reason':'pixel_review_unavailable_or_invalid'}
+            write_json(folder / 'click-grounding.json', {'version':'click-full-frame-v2', 'transform':click_transform,
+                'model_result':audit_raw, 'frame_bbox':bbox, 'pixel_review':review, 'accepted':accepted})
+            if accepted:
                 result.update(answer=object_introduction(obj, book.get("language")), uncertain=False,
                     object=obj, boxes=[{"bbox": bbox, "label": str(obj.get("label", "")), "source": "clicked_video_frame"}])
         elif frame:
             safe_frame(frame, folder / "frame.jpg")
         if not match and not self.provider.available("vision"):
             result["answer"] = "当前页面没有覆盖这个位置的对象标注；请配置视觉模型以识别画面中的对象。"
+        if not result.get('object'):
+            result.update(status='object_not_confirmed',success=False)
         return await self._finish(book, session_id, f"点击视频 {timestamp:.2f}s 的位置 ({x:.3f},{y:.3f})", result, started, turn_id, folder, "touch")

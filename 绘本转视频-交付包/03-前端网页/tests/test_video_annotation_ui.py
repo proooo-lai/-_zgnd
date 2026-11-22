@@ -116,6 +116,15 @@ console.log(JSON.stringify({applied:await pending,boxes:layer.children.length,hi
     assert value == {'applied': False, 'boxes': 0, 'hidden': True, 'time': 90}
 
 
+def test_verified_object_location_uses_the_same_exact_frame_controller():
+    value=run_ui(r'''
+(async()=>{const item=result();item.object_location={...item.text_location,action:'locate_object',target_label:'elephant',frame_url:'/media/book/turns/turn/object-location/scene-00-frame-0.png'};delete item.text_location;
+item.boxes[0].kind='object';const pending=annotations.apply(item);images[0]?.loaded();await flush();video.finishSeek();
+console.log(JSON.stringify({applied:await pending,boxes:layer.children.length,paused:video.paused}));annotations.clear()})()
+''')
+    assert value=={'applied':True,'boxes':1,'paused':True}
+
+
 @pytest.mark.parametrize('applied', [True, False])
 def test_answer_acceptance_waits_for_annotations_and_reports_display_failure(applied):
     source = (WEB / 'app.js').read_text()

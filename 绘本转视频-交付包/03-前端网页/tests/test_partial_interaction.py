@@ -92,7 +92,7 @@ def test_already_emitted_audio_survives_later_failure(tmp_path, monkeypatch, fai
             raise ProviderError("grounding failed")
         monkeypatch.setattr(reader, "ground_target", fail_ground)
         with pytest.raises(ProviderError):
-            await reader.ask("book1", "Find the bird", "s1", emit=emit)
+            await reader.ask("book1", "Show me the bird in the book", "s1", emit=emit)
         assert any(kind == "audio_pcm" for kind, _ in events)
         turns = store.history("book1", "s1")
         assert len(turns) == 1

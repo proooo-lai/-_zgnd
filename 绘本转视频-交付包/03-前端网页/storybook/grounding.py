@@ -33,6 +33,25 @@ class ClickObservation(BaseModel):
         return box
 
 
+class PixelVerdict(BaseModel):
+    model_config = ConfigDict(strict=True, extra='forbid')
+    supported: bool
+    uncertain: bool
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+def click_pixel_detail(source: Path, output: Path, x: float, y: float) -> Path:
+    """A small unmarked evidence crop; never used as a coordinate reference."""
+    with Image.open(source) as image:
+        width, height = image.size
+        radius = max(8, round(min(width, height) * .048))
+        px, py = round(x * (width-1)), round(y * (height-1))
+        crop = image.convert('RGB').crop((max(0, px-radius), max(0, py-radius),
+                                         min(width, px+radius+1), min(height, py+radius+1)))
+        crop.resize((420,420), Image.Resampling.LANCZOS).save(output)
+    return output
+
+
 def make_click_context(source: Path, folder: Path, x: float, y: float) -> tuple[list[Path], dict]:
     """A bounded square crop, with an explicit pixel-edge transform to the frame.
 

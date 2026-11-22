@@ -21,7 +21,8 @@ def test_click_uses_original_and_visible_point_with_converted_box(tmp_path):
     assert result['object']['bbox'] == pytest.approx([.38,.45,.2,.25])
     assert result['boxes'][0]['bbox'] == pytest.approx([.38,.45,.2,.25])
     images = provider.calls[0]['images']
-    assert len(images) == 4
+    assert len(images) == 2
+    assert '上下文仅供辨认名字' not in provider.calls[0]['prompt']
     with Image.open(images[0]) as original, Image.open(images[1]) as marked:
         assert marked.size == original.size
         xy = round(.46*(original.width-1)), round(.55*(original.height-1))
@@ -51,6 +52,16 @@ def test_bbox_must_contain_clicked_point_after_corner_conversion(tmp_path):
     result = asyncio.run(Interactor(store, provider, SimpleNamespace()).touch(
         'synthetic', .46, .55, 12, 's1', encoded_frame()))
     assert result['uncertain'] is True and result['boxes'] == []
+    assert result['status']=='object_not_confirmed' and result['success'] is False
+
+
+def test_debug_marker_description_is_never_read_as_an_object_feature(tmp_path):
+    store=Store(tmp_path);make_book(store,generated=True)
+    reply={'found':True,'label':'小女孩','description':'鼻子有红色十字标记。',
+           'coordinate_space':'full_frame','bbox_1000':[380,450,580,700],'confidence':.95}
+    result=asyncio.run(Interactor(store,ScriptedProvider([reply],enabled=('vision',)),SimpleNamespace()).touch(
+        'synthetic',.46,.55,12,'s1',encoded_frame()))
+    assert result['object']['label']=='小女孩' and '十字' not in result['answer']
 
 
 @pytest.mark.parametrize('point', [(0,0),(1,1)])
@@ -61,7 +72,7 @@ def test_visible_marker_remains_inside_image_at_edges(tmp_path, point):
         'synthetic', *point, 12, 's1', encoded_frame('green')))
     assert result['uncertain'] is True
     images = provider.calls[0]['images']
-    assert len(images) == 4
+    assert len(images) == 2
     with Image.open(images[1]) as marked:
         pixel = marked.convert('RGB').getpixel((round(point[0]*(marked.width-1)),round(point[1]*(marked.height-1))))
         assert pixel[0] > 180 and pixel[1] < 70
@@ -87,7 +98,7 @@ def test_click_crop_records_exact_geometry_and_mapping_without_edge_padding(tmp_
     assert observation.video_box() is None  # Never silently treat crop coordinates as frame coordinates.
 
 
-def test_localized_model_box_is_mapped_and_audited_in_original_frame(tmp_path):
+def test_click_rejects_crop_coordinates_when_only_full_frames_were_sent(tmp_path):
     import json
     store = Store(tmp_path); make_book(store, generated=True)
     reply = {'found':True,'label':'small original object','bbox_1000':[400,400,600,600],
@@ -95,11 +106,9 @@ def test_localized_model_box_is_mapped_and_audited_in_original_frame(tmp_path):
     provider = ScriptedProvider([reply], enabled=('vision',))
     result = asyncio.run(Interactor(store, provider, SimpleNamespace()).touch(
         'synthetic',.5,.5,12,'s1',encoded_frame('green')))
-    assert not result['uncertain']
-    box = result['boxes'][0]['bbox']
-    assert box[0] < .5 < box[0]+box[2] and box[1] < .5 < box[1]+box[3]
+    assert result['uncertain'] and result['boxes']==[]
     audit = json.loads((tmp_path/'synthetic/turns'/result['turn_id']/'click-grounding.json').read_text())
-    assert audit['accepted'] is True and audit['model_result'] == reply
+    assert audit['accepted'] is False and audit['model_result'] == reply
     assert audit['transform']['frame_size'] == [160,90]
     assert 'coordinate_space' in provider.calls[0]['prompt']
 
@@ -133,3 +142,17 @@ def test_nonfinite_model_values_are_rejected_without_breaking_private_audit(tmp_
     assert result['uncertain'] and result['boxes']==[]
     audit=json.loads((tmp_path/'synthetic/turns'/result['turn_id']/'click-grounding.json').read_text())
     assert audit['accepted'] is False and audit['model_result']=={'invalid_json_value':True}
+
+
+@pytest.mark.parametrize('supported,uncertain',[(False,False),(True,True)])
+def test_fabricated_box_at_a_blank_click_is_rejected_by_independent_pixel_review(tmp_path,supported,uncertain):
+    class Reviewed(ScriptedProvider):
+        async def vision(self,prompt,images):
+            if 'CLICK_PIXEL_REVIEW_V1' in prompt:
+                return {'supported':supported,'uncertain':uncertain,'reason':'The point is blank.'}
+            return await super().vision(prompt,images)
+    store=Store(tmp_path);make_book(store,generated=True)
+    provider=Reviewed([{'found':True,'label':'imaginary rabbit','description':'White rabbit.',
+        'coordinate_space':'full_frame','bbox_1000':[490,490,520,520],'confidence':.99}],enabled=('vision',))
+    result=asyncio.run(Interactor(store,provider,SimpleNamespace()).touch('synthetic',.5,.5,12,'s1',encoded_frame('white')))
+    assert result['uncertain'] and result['boxes']==[] and 'object' not in result

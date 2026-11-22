@@ -205,7 +205,7 @@ def test_first_audio_is_available_before_slow_target_grounding(tmp_path, monkeyp
             order.append("grounded")
             return [{"bbox": [.1, .2, .2, .2], "label": "bird"}]
         monkeypatch.setattr(reader, "ground_target", slow_ground)
-        result = await reader.ask("book1", "Find the bird", "s1", emit=emit)
+        result = await reader.ask("book1", "Show me the bird in the book", "s1", emit=emit)
         assert order.index("audio") < order.index("grounded")
         assert result["boxes"]
         assert ANSWER_CALLBACK.get() is None
@@ -234,7 +234,7 @@ def test_cancel_during_grounding_cancels_and_joins_early_tts_task(tmp_path, monk
         async def emit(*args):
             pass
         monkeypatch.setattr(reader, "ground_target", slow_ground)
-        task = asyncio.create_task(reader.ask("book1", "Find the bird", "s1", emit=emit))
+        task = asyncio.create_task(reader.ask("book1", "Show me the bird in the book", "s1", emit=emit))
         try:
             await asyncio.wait_for(started.wait(), .5)
             await asyncio.wait_for(grounding.wait(), .5)

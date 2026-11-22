@@ -12,14 +12,16 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Literal
 
 from .interaction import Interactor
+from .object_agents import ObjectAgents
 from .metrics import acoustic_record_error
 from .pipeline import build_book
 from .providers import Provider, ProviderError
 from .schema import write_json
+from .session_work import SessionWork
 from .settings import ROOT, Settings
 from .storage import Store
 from .video import run_process
@@ -46,6 +48,20 @@ class Review(BaseModel):
     reviewer: str = Field(min_length=1, max_length=80)
     approved: bool
     note: str = Field(default="", max_length=2000)
+
+
+class ObjectQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=4000)
+    session_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
+    request_id: str = Field(pattern=r"^[0-9a-fA-F-]{36}$")
+    voice: str | None = Field(default=None, max_length=80)
+
+
+class ObjectTouch(Touch):
+    model_config = ConfigDict(extra="forbid")
+    agent_id: str = Field(pattern=r"^object-[a-f0-9]{32}$")
+    request_id: str = Field(pattern=r"^[0-9a-fA-F-]{36}$")
 
 
 class Metric(BaseModel):
@@ -79,6 +95,8 @@ def create_app(settings=None, provider=None):
     store = Store(settings.data_dir)
     provider = provider or Provider(settings)
     interactor = Interactor(store, provider, settings)
+    object_agents = ObjectAgents(store, interactor)
+    session_work = SessionWork()
     jobs = {}
     active_tasks = set()
     job_tasks = {}
@@ -95,6 +113,7 @@ def create_app(settings=None, provider=None):
 
     app = FastAPI(title="纸书智伴", version="1.0.0", lifespan=lifespan)
     app.state.settings, app.state.store, app.state.provider = settings, store, provider
+    app.state.object_agents, app.state.session_work = object_agents, session_work
     # 供测试断言运行期状态（任务表 / 生成锁），不改变运行时行为
     app.state.jobs, app.state.book_lock = jobs, book_lock
 
@@ -245,9 +264,14 @@ def create_app(settings=None, provider=None):
             job.update(status="interrupted", error="上次运行在任务完成前停止；请重新导入")
         return job
 
+    async def session_operation(book_id, session_id, operation, expected_version=None):
+        async with session_work.operation(book_id, session_id, expected_version):
+            return await operation()
+
     @app.post("/api/books/{book_id}/ask")
     async def ask(book_id: str, body: Question):
-        return await interactor.ask(book_id, body.question.strip(), body.session_id, body.time, body.frame, voice=body.voice)
+        return await session_operation(book_id, body.session_id,
+            lambda: interactor.ask(book_id, body.question.strip(), body.session_id, body.time, body.frame, voice=body.voice))
 
     def stream_response(operation):
         async def events():
@@ -284,13 +308,41 @@ def create_app(settings=None, provider=None):
     @app.post("/api/books/{book_id}/ask/stream")
     async def ask_stream(book_id: str, body: Question):
         store.book(book_id)
-        return stream_response(lambda emit: interactor.ask(book_id, body.question.strip(), body.session_id, body.time, body.frame, emit=emit, voice=body.voice))
+        version = session_work.version(book_id, body.session_id)
+        return stream_response(lambda emit: session_operation(book_id, body.session_id,
+            lambda: interactor.ask(book_id, body.question.strip(), body.session_id, body.time, body.frame, emit=emit, voice=body.voice), version))
 
     @app.post("/api/books/{book_id}/touch")
     async def touch(book_id: str, body: Touch):
-        return await interactor.touch(book_id, body.x, body.y, body.time, body.session_id, body.frame, body.voice)
+        return await session_operation(book_id, body.session_id,
+            lambda: interactor.touch(book_id, body.x, body.y, body.time, body.session_id, body.frame, body.voice))
 
-    async def process_voice(book_id, audio, session_id, time, emit=None, frame=None, voice=None):
+    @app.post("/api/books/{book_id}/object-agents")
+    async def create_object_agent(book_id: str, body: ObjectTouch):
+        return await object_agents.create(book_id, body.x, body.y, body.time, body.session_id, body.frame,
+                                          body.voice, agent_id=body.agent_id, request_id=body.request_id)
+
+    @app.get("/api/books/{book_id}/object-agents/{agent_id}/history")
+    async def object_history(book_id: str, agent_id: str, session_id: str):
+        context = object_agents.get(book_id, agent_id, session_id)
+        return {"agent": object_agents.public(context), "turns": store.history(book_id, agent_id)}
+
+    @app.post("/api/books/{book_id}/object-agents/{agent_id}/cancel")
+    async def cancel_object(book_id: str, agent_id: str, session_id: str, request_id: str):
+        await object_agents.cancel(book_id, agent_id, session_id, request_id)
+        return {"cancelled": True}
+
+    @app.post("/api/books/{book_id}/object-agents/{agent_id}/ask")
+    async def ask_object(book_id: str, agent_id: str, body: ObjectQuestion):
+        return await object_agents.ask(book_id, agent_id, body.session_id, body.request_id, body.question.strip(), voice=body.voice)
+
+    @app.post("/api/books/{book_id}/object-agents/{agent_id}/ask/stream")
+    async def ask_object_stream(book_id: str, agent_id: str, body: ObjectQuestion):
+        object_agents.get(book_id, agent_id, body.session_id)
+        return stream_response(lambda emit: object_agents.ask(book_id, agent_id, body.session_id, body.request_id,
+            body.question.strip(), voice=body.voice, emit=emit))
+
+    async def process_voice_inner(book_id, audio, session_id, time, emit=None, frame=None, voice=None, focus_turn=None):
         store.book(book_id)
         store.identifier(session_id)
         if not math.isfinite(time) or time < 0 or time > 100000:
@@ -324,7 +376,7 @@ def create_app(settings=None, provider=None):
         asr_ms = round((__import__("time").perf_counter() - started) * 1000)
         try:
             result = await interactor.ask(book_id, transcript, session_id, time, frame=frame,
-                                          turn_id=turn_id, input_kind="voice", emit=emit, voice=voice)
+                                          turn_id=turn_id, input_kind="voice", emit=emit, voice=voice, focus_turn=focus_turn)
         except BaseException:
             # A failed turn may already have emitted speech. Its partial history
             # owns the input and emitted prefix, even though it is not successful.
@@ -342,6 +394,10 @@ def create_app(settings=None, provider=None):
         store.update_turn(book_id, session_id, turn_id, {"transcript": transcript, "timings": result["timings"]})
         return result
 
+    async def process_voice(book_id, audio, session_id, time, emit=None, frame=None, voice=None, focus_turn=None):
+        return await session_operation(book_id, session_id,
+            lambda: process_voice_inner(book_id, audio, session_id, time, emit, frame, voice, focus_turn))
+
     @app.post("/api/books/{book_id}/voice")
     async def voice(book_id: str, audio: UploadFile = File(...), session_id: str = Form("default"), time: float = Form(0),
                     frame: str | None = Form(None, max_length=8_000_000), voice: str | None = Form(None, max_length=80)):
@@ -351,6 +407,7 @@ def create_app(settings=None, provider=None):
     async def voice_stream(book_id: str, audio: UploadFile = File(...), session_id: str = Form("default"), time: float = Form(0),
                            frame: str | None = Form(None, max_length=8_000_000), voice: str | None = Form(None, max_length=80)):
         store.book(book_id)
+        version = session_work.version(book_id, session_id)
         if not provider.available("asr"):
             raise HTTPException(409, "请先在本机设置中配置语音识别服务")
         # Read UploadFile before the response starts so its request-scoped file
@@ -360,7 +417,30 @@ def create_app(settings=None, provider=None):
         if len(contents) > 20 * 1024 * 1024:
             raise ValueError("音频不得超过 20MB")
         copied = UploadFile(file=io.BytesIO(contents), filename=audio.filename)
-        return stream_response(lambda emit: process_voice(book_id, copied, session_id, time, emit, frame, voice))
+        return stream_response(lambda emit: session_operation(book_id, session_id,
+            lambda: process_voice_inner(book_id, copied, session_id, time, emit, frame, voice), version))
+
+    async def process_object_voice(book_id, agent_id, parent, request_id, audio, voice, emit=None):
+        async with object_agents.operation(book_id, agent_id, parent, request_id):
+            params = object_agents.parameters(book_id, agent_id, parent)
+            timestamp = params.pop("timestamp")
+            return await process_voice(book_id, audio, time=timestamp, emit=emit, voice=voice, **params)
+
+    @app.post("/api/books/{book_id}/object-agents/{agent_id}/voice")
+    async def object_voice(book_id: str, agent_id: str, audio: UploadFile = File(...), session_id: str = Form(...),
+                           request_id: str = Form(...), voice: str | None = Form(None, max_length=80)):
+        return await process_object_voice(book_id, agent_id, session_id, request_id, audio, voice)
+
+    @app.post("/api/books/{book_id}/object-agents/{agent_id}/voice/stream")
+    async def object_voice_stream(book_id: str, agent_id: str, audio: UploadFile = File(...), session_id: str = Form(...),
+                                  request_id: str = Form(...), voice: str | None = Form(None, max_length=80)):
+        object_agents.get(book_id, agent_id, session_id)
+        import io
+        contents = await audio.read(20 * 1024 * 1024 + 1)
+        if len(contents) > 20 * 1024 * 1024:
+            raise ValueError("音频不得超过 20MB")
+        copied = UploadFile(file=io.BytesIO(contents), filename=audio.filename)
+        return stream_response(lambda emit: process_object_voice(book_id, agent_id, session_id, request_id, copied, voice, emit))
 
     @app.delete("/api/books/{book_id}")
     async def delete_book(book_id: str):
@@ -369,6 +449,7 @@ def create_app(settings=None, provider=None):
         for job in list(jobs.values()):
             if job.get("book_id") == book_id and job.get("status") in ("queued", "running"):
                 raise HTTPException(409, "这本绘本正在生成，请等任务结束后再删除")
+        await object_agents.clear(book_id)
         store.delete(book_id)
         for job_id, job in list(jobs.items()):
             if job.get("book_id") == book_id:
@@ -386,7 +467,10 @@ def create_app(settings=None, provider=None):
 
     @app.delete("/api/books/{book_id}/history")
     async def clear_history(book_id: str, session_id: str = "default"):
-        store.clear_history(book_id, session_id)
+        store.identifier(session_id)
+        async with session_work.clear(book_id, session_id):
+            await object_agents.clear(book_id, session_id)
+            store.clear_history(book_id, session_id)
         return {"cleared": True}
 
     @app.post("/api/books/{book_id}/review")

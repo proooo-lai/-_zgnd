@@ -276,7 +276,7 @@ class Interactor:
         self.store.append(book["id"], session_id, history)
         return result
 
-    async def ask(self, book_id, question, session_id, timestamp=0, frame=None, turn_id=None, input_kind="text", emit=None, voice=None):
+    async def ask(self, book_id, question, session_id, timestamp=0, frame=None, turn_id=None, input_kind="text", emit=None, voice=None, focus_turn=None):
         ANSWER_VOICE.set(voice)
         started = time.perf_counter()
         book = self.store.book(book_id)
@@ -316,9 +316,12 @@ class Interactor:
         scene = scene_at(book, timestamp)
         current = scene["page_number"] if scene else None
         prior = self.store.history(book_id, session_id, limit=12)
-        selected = selected_object(prior, current, timestamp)
+        selected = selected_object([focus_turn] if focus_turn else prior, current, timestamp)
         refers_to_selection = bool(selected and re.search(
             r"他|她|它|这[个只位些]|那[个只位些]|刚才|\b(?:it|its|he|his|him|she|her|they|their|them|that|this)\b", question, re.I))
+        if focus_turn and selected:
+            # A short subjectless follow-up in an object window refers to its target.
+            refers_to_selection = refers_to_selection or bool(re.match(r"^(?:在?干什么|在?做什么|怎么了|为什么|why\b|doing\b)", question, re.I))
         if safety_check(question)["blocked"]:
             return await self._finish(book, session_id, question, {"answer": "这个问题涉及危险内容。我们可以聊聊故事中的角色和安全的做法。", "uncertain": True}, started, turn_id, folder, input_kind)
         story_followup = bool(refers_to_selection and re.search(
@@ -344,6 +347,10 @@ class Interactor:
                    "不要重复问题，不要用反问、教学提问或让孩子自己找答案来替代作答。"
                    "若证据不足，直接说明无法确定，不得编造。只有用户明确要求找、跳转、定位、框选时才设置seek_page和target_label；普通事实问答不要自动跳转。")
         prompt += "不要声称看到了画面中没有的对象；不把叙事补充当作原文事实。检索对象或原画面文字（非字幕）时给出目标页。"
+        if focus_turn:
+            prompt += ("本轮来自对象专属助手，selected_object是该助手固定负责的对象，当前帧是创建助手时冻结的画面。"
+                       "省略主语的追问默认指向该对象；明确点名其他角色时以用户问题为准。"
+                       "使用第三人称解释，不扮演原书角色，不编造角色的记忆、经历或想法。")
         prompt += ("\nselected_object是最近可靠点选的对象，仅供消解‘他/它/这个’等指代；明确点名其他角色的问题以新问题为准。"
                    "对象介绍和历史回答不是故事证据。对点选后的动作、原因或关系追问，检索该角色在整本书中的情节，"
                    "回答应说明可核对的故事动作/关系，不能只重复外貌或百科介绍。"
@@ -381,7 +388,7 @@ class Interactor:
                                  "story_followup": story_followup}
             if split_followup:
                 image = await self.frame(book, timestamp, folder / "frame.jpg", frame)
-                model = await draft_followup(self.provider, question, selected, outlines, current, image, answer_language)
+                model = await draft_followup(self.provider, question, selected, outlines, current, image, answer_language, prior)
                 model = await self._validate_followup(book, model, question, folder, reference_context)
             else:
                 if not requires_frame or self.provider.available("vision"):

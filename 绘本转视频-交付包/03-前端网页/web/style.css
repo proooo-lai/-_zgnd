@@ -602,3 +602,34 @@ dialog > form > :last-child:not(.dialog-actions) { margin-bottom: 0; }
   .form-row { grid-template-columns: 1fr; }
   .sidebar { padding: 8px 10px; }
 }
+
+
+/* Independent object assistant; the main conversation stays in its own column. */
+.object-agent {
+  position: fixed; z-index: 60; right: calc(clamp(280px, 20vw, 340px) + 24px); bottom: 22px;
+  width: min(390px, calc(100vw - 28px)); max-height: min(650px, calc(100dvh - 44px));
+  display: flex; flex-direction: column; text-align: left; color: var(--text);
+  background: var(--surface); border: 2px solid var(--mint); border-radius: 22px;
+  box-shadow: 0 8px 0 #d5e8d7, 0 18px 50px #34250f2b; overflow: hidden; cursor: default;
+}
+.object-heading { display: flex; align-items: center; gap: 10px; padding: 14px; background: #eaf8ee; border-bottom: 2px solid var(--line); }
+.object-heading-copy { min-width: 0; flex: 1; }
+.object-heading h2 { margin: 0; overflow-wrap: anywhere; font-size: 17px; }
+.object-heading p { margin: 0; }
+.object-heading .eyebrow { font-size: 10px; letter-spacing: .08em; }
+.object-heading .icon-button { flex-shrink: 0; }
+.object-avatar { flex: 0 0 56px; object-fit: contain; border: 2px solid var(--line-strong); border-radius: 16px; background: var(--paper); }
+.object-avatar:not([src]) { visibility: hidden; }
+.object-history { overflow-y: auto; min-height: 110px; padding: 14px; flex: 1 1 auto; overscroll-behavior: contain; }
+.object-history .turn { margin-bottom: 14px; }
+.object-composer { padding: 10px 14px 14px; border-top: 2px solid var(--line); flex-shrink: 0; }
+.object-composer textarea { resize: vertical; max-height: 110px; }
+.object-composer .composer-actions { margin-top: 8px; }
+.object-composer .privacy-note { margin: 10px 0 0; }
+.object-evidence { margin-top: 8px; font-size: 12px; }
+.object-evidence summary { cursor: pointer; color: #226b55; font-weight: 700; }
+.object-evidence blockquote { margin: 6px 0; padding: 8px 10px; background: #f5f0e5; border-radius: 8px; white-space: pre-wrap; }
+.object-agent .turn-warning { color: #a33c36; font-size: 12px; }
+#video-stage:fullscreen .object-agent { right: 24px; }
+@media (max-width: 1100px) { .object-agent { right: 16px; bottom: 16px; } }
+@media (max-width: 600px) { .object-agent { right: 10px; bottom: 10px; max-height: calc(100dvh - 20px); width: calc(100vw - 20px); } .object-heading { padding: 10px; } }

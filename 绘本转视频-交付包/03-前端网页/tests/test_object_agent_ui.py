@@ -15,10 +15,10 @@ def run_ui(scenario):
         pytest.skip("Node.js is needed for UI controller checks")
     setup = r'''
 const elements=new Map();
-function element(){return {children:[],classList:{items:new Set(['hidden']),add(x){this.items.add(x)},remove(x){this.items.delete(x)},toggle(x,v){if(v)this.items.add(x);else this.items.delete(x)},contains(x){return this.items.has(x)}},value:'',textContent:'',disabled:false,append(...items){this.children.push(...items)},replaceChildren(...items){this.children=[...items]},setAttribute(){},removeAttribute(){},focus(){},contains(){return false},querySelector(){return null}}}
+function element(){return {children:[],style:{},classList:{items:new Set(['hidden']),add(x){this.items.add(x)},remove(x){this.items.delete(x)},toggle(x,v){if(v)this.items.add(x);else this.items.delete(x)},contains(x){return this.items.has(x)}},getBoundingClientRect(){return {left:parseFloat(this.style.left)||100,top:parseFloat(this.style.top)||80,width:390,height:600}},setPointerCapture(id){this.pointer=id},hasPointerCapture(id){return this.pointer===id},releasePointerCapture(){this.pointer=null},value:'',textContent:'',disabled:false,append(...items){this.children.push(...items)},replaceChildren(...items){this.children=[...items]},setAttribute(){},removeAttribute(){},focus(){},contains(){return false},querySelector(){return null}}}
 const $=id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id)};
 const node=(tag,cls,text)=>Object.assign(element(),{tag,className:cls,textContent:text||''});
-const window=globalThis;window.addEventListener=()=>{};
+const window=globalThis,windowListeners={};window.innerWidth=1000;window.innerHeight=800;window.addEventListener=(name,fn)=>{windowListeners[name]=fn};
 const document={activeElement:null,addEventListener(){}};
 const location={href:'http://localhost/'};
 const safeURL=x=>x,imageURL=x=>x,fmt=x=>String(x),stopAnswer=()=>{};
@@ -83,6 +83,41 @@ const calls=[];fetch=async(path,options)=>{if(path.includes('/cancel?'))return r
     assert result["disabled"] is False
     assert any("Background unavailable." in text for text in result["texts"])
     assert any("Still the apple." in text for text in result["texts"])
+
+
+def test_background_failure_has_explicit_retry_for_same_target_without_reclick():
+    result = run_ui(r'''
+let attempts=0;const calls=[];
+fetch=async(path,options)=>{if(path.includes('/cancel?'))return response({cancelled:true});calls.push(path);const body=JSON.parse(options.body);if(path.endsWith('/background')){attempts++;return attempts===1?{ok:false,status:502,json:async()=>({detail:'Connection interrupted; submission unknown.'})}:response({answer:'The apple is under the tree.',background_state:'supported',evidence:[{page_number:1,quote:'A red apple is under the tree.'}]})}const data=child(body.agent_id,'apple');data.agent.background_available=true;return response(data)};
+(async()=>{await ObjectAssistant.open(snapshot);const offered=!$('object-background-retry').classList.contains('hidden');await $('object-background-retry').onclick();console.log(JSON.stringify({offered,calls,title:$('object-title').textContent,hidden:$('object-background-retry').classList.contains('hidden'),disabled:$('object-send').disabled,texts:$('object-history').children.map(x=>x.children.map(y=>y.textContent).join(' '))}));ObjectAssistant.close()})()
+''')
+    assert result['offered'] and result['hidden'] and result['disabled'] is False
+    assert len(result['calls'])==3
+    assert result['calls'][1]==result['calls'][2] and result['calls'][2].endswith('/background')
+    assert 'apple' in result['title']
+    assert any('The apple is under the tree.' in text for text in result['texts'])
+
+
+def test_title_drag_stays_visible_survives_reopen_and_reclamps_after_resize():
+    result=run_ui(r'''
+fetch=async()=>response(child('one','apple'));
+const pointer=(id,x,y,target={closest:()=>null})=>({pointerId:id,clientX:x,clientY:y,button:0,isPrimary:true,target,preventDefault(){}});
+(async()=>{await ObjectAssistant.open(snapshot);const handle=$('object-drag-handle'),panel=$('object-agent');handle.onpointerdown(pointer(1,120,100));handle.onpointermove(pointer(1,300,190));handle.onpointerup(pointer(1,300,190));const moved={...panel.style};ObjectAssistant.close();await ObjectAssistant.open(snapshot);const reopened={...panel.style};handle.onpointerdown(pointer(2,300,190));handle.onpointermove(pointer(2,9999,9999));handle.onpointercancel(pointer(2,9999,9999));const edge={...panel.style};window.innerWidth=500;window.innerHeight=700;windowListeners.resize();const resized={...panel.style};handle.onpointerdown(pointer(3,0,0,{closest:()=>({tagName:'BUTTON'})}));handle.onpointermove(pointer(3,-900,-900));const buttonIgnored={...panel.style};console.log(JSON.stringify({moved,reopened,edge,resized,buttonIgnored,captured:handle.pointer}));ObjectAssistant.close()})()
+''')
+    assert result['moved']['left']=='280px' and result['moved']['top']=='170px'
+    assert result['reopened']==result['moved']
+    assert result['edge']['left']=='600px' and result['edge']['top']=='190px'
+    assert result['resized']['left']=='100px' and result['resized']['top']=='90px'
+    assert result['buttonIgnored']==result['resized'] and result['captured'] is None
+
+
+def test_title_keyboard_moves_only_the_header_and_keeps_escape_close():
+    result=run_ui(r'''
+fetch=async()=>response(child('one','apple'));
+(async()=>{await ObjectAssistant.open(snapshot);const handle=$('object-drag-handle'),panel=$('object-agent');handle.onkeydown({key:'ArrowLeft',target:handle,preventDefault(){},stopPropagation(){}});handle.onkeydown({key:'ArrowDown',target:handle,shiftKey:true,preventDefault(){},stopPropagation(){}});const moved={...panel.style};handle.onkeydown({key:'ArrowRight',target:$('object-close'),preventDefault(){},stopPropagation(){}});const ignored={...panel.style};panel.onkeydown({key:'Escape',preventDefault(){},stopPropagation(){}});console.log(JSON.stringify({moved,ignored,hidden:panel.classList.contains('hidden')}))})()
+''')
+    assert result['moved']['left']=='88px' and result['moved']['top']=='120px'
+    assert result['moved']==result['ignored'] and result['hidden']
 
 
 @pytest.mark.parametrize("action", ["close", "new_target", "interrupt"])

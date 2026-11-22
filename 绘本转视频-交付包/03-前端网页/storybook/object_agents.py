@@ -16,6 +16,8 @@ from PIL import Image
 from .interaction import selected_object
 from .schema import write_json
 
+BACKGROUND_VERSION = "object-background-context-v2"
+
 
 class ObjectAgents:
     def __init__(self, store, interactor):
@@ -132,16 +134,16 @@ class ObjectAgents:
     async def background(self, book_id, agent_id, parent, request_id, voice=None):
         async with self.operation(book_id, agent_id, parent, request_id):
             context = self.get(book_id, agent_id, parent)
-            if context.get("background_result"):
+            if context.get("background_result", {}).get("background_version") == BACKGROUND_VERSION:
                 return {**context["background_result"], "background_execution": "reused_same_object"}
             question = ("请仅根据原书可定位的证据，介绍它在故事里的相关背景、情节和角色关系，并给出支持介绍的原书页码。"
                         "不以外貌、百科常识或之前的介绍代替故事证据；对没有证据的经历、动机和身世明确说明无法确认，不要编造。")
             result = await self.interactor.ask(book_id, question, **self.parameters(book_id, agent_id, parent),
                                                input_kind="object_background", voice=voice)
             result.update(background_state="supported" if not result.get("uncertain") and result.get("evidence") else "unconfirmed",
-                          background_execution="live")
+                          background_execution="live", background_version=BACKGROUND_VERSION)
             self.store.update_turn(book_id, agent_id, result["turn_id"],
-                                   {key: result[key] for key in ("background_state", "background_execution")})
+                                   {key: result[key] for key in ("background_state", "background_execution", "background_version")})
             validation = result.get("evidence_validation", {})
             reusable = validation.get("decision") == "supported" or validation.get("reason") in (
                 "uncertain_or_invalid_references", "evidence_does_not_support_answer")

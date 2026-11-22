@@ -324,6 +324,12 @@ class Interactor:
         current = scene["page_number"] if scene else None
         prior = self.store.history(book_id, session_id, limit=12)
         selected = selected_object([focus_turn] if focus_turn else prior, current, timestamp)
+        if input_kind == "object_background" and selected and focus_turn:
+            observation = (focus_turn.get("object") or {}).get("description")
+            if isinstance(observation, str) and observation.strip():
+                # Preserve target disambiguation when recognition returns a
+                # generic label. This observation is never book evidence.
+                selected["visual_reference_only"] = observation.strip()[:800]
         refers_to_selection = bool(selected and re.search(
             r"他|她|它|这[个只位些]|那[个只位些]|刚才|\b(?:it|its|he|his|him|she|her|they|their|them|that|this)\b", question, re.I))
         if focus_turn and selected:
@@ -403,7 +409,10 @@ class Interactor:
         visual_question = (visual_question or requires_frame or refers_to_selection) and not book_only
         if book_only:
             requires_frame = False
-            prompt += "\n本轮只介绍所选对象在原书中的背景。只能引用原书证据，不以当前视频或常识补写，不设置跳转或框选目标。"
+            prompt += ("\n本轮只介绍所选对象在原书中的背景。只能引用原书证据，不以当前视频或常识补写，不设置跳转或框选目标。"
+                       "selected_object.visual_reference_only只是先前点选画面的消歧线索，可能有误，不能作为故事事实或姓名证据。"
+                       "优先介绍当前原书页可确认的相关情节。若不能确认角色姓名，可用‘这一页里’介绍有证据的场景背景并说明身份未确认；"
+                       "不得将同页其他角色的动作归给所选对象，也不得为了给出名字而猜身份。")
         # A streamed draft is untrusted until all references and claims pass.
         context_token = ANSWER_CALLBACK.set(None)
         try:

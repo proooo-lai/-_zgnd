@@ -1,0 +1,97 @@
+{
+  "date": "2026-11-22",
+  "scope": "object_background_and_movable_window_not_full_evaluation",
+  "automated": {
+    "passed": 393,
+    "failed": 0,
+    "skipped": 0,
+    "dependency_deprecation_warnings": 6,
+    "commands": [
+      ".venv/bin/python -m pytest -q --tb=short",
+      ".venv/bin/python -m pip check",
+      "node --check web/object-agent.js",
+      "git diff --check"
+    ],
+    "independent_review_focused_passed": 33
+  },
+  "root_findings": [
+    "prior_submission_and_download_connection_failures_not_reproduced_with_fresh_text_and_tts_probes",
+    "generic_recognition_label_lost_visual_disambiguation_context",
+    "no_explicit_same_object_retry_in_window",
+    "short_viewport_clipped_send_button"
+  ],
+  "changes": {
+    "visual_reference": "background_only_context_not_story_evidence_800_character_limit",
+    "evidence_review_gate": "unchanged",
+    "background_version": "object-background-context-v2",
+    "retry": "user_explicit_same_frozen_target_no_auto_unknown_post_retry",
+    "movement": [
+      "mouse_pointer_capture",
+      "touch",
+      "arrow_keys",
+      "shift_arrow_keys",
+      "resize_and_visual_viewport_limits",
+      "content_resize",
+      "fullscreen_change_reclamp"
+    ],
+    "short_viewport": "history_shrinks_composer_scrolls_header_preserved"
+  },
+  "live": {
+    "source": "existing_authorized_video_developer_selected_point_no_competition_queries",
+    "mocked_model_responses": false,
+    "sample_size": 1,
+    "background": {
+      "http": 200,
+      "state": "supported",
+      "uncertain": false,
+      "evidence_count": 5,
+      "independent_model_review": "supported",
+      "audio_complete": true,
+      "audio_validation": {
+        "frames": 1032960,
+        "rate": 24000,
+        "channels": 1,
+        "sample_width": 2,
+        "seconds": 43.04,
+        "complete_data": true
+      },
+      "server_total_ms": 37198,
+      "answer_ready_ms": 28660,
+      "tts_complete_ms": 8539,
+      "click_to_background_ms": 47428
+    },
+    "main_history_unchanged": true,
+    "browser_page_errors": 0,
+    "drag_cases": [
+      "mouse_while_background_loading",
+      "viewport_edge",
+      "mobile_resize",
+      "touch",
+      "keyboard"
+    ],
+    "text_input": true,
+    "close_button": true,
+    "short_viewport": {
+      "size": [
+        430,
+        340
+      ],
+      "send_inside": true,
+      "input_inside": true,
+      "send_reachable": true,
+      "input_usable": true
+    },
+    "real_phone_soft_keyboard": false,
+    "microphone_or_acoustic_latency": false
+  },
+  "timing": "single_request_proxy_not_p50_p95_or_audible_latency",
+  "limitations": [
+    "external_network_can_fail_again",
+    "single_development_object_not_accuracy_estimate",
+    "background_latency_still_high",
+    "same_model_review_can_share_bias",
+    "no_second_book_cold_start_or_official_evaluation",
+    "human_content_review_pending"
+  ],
+  "restricted_raw_data_committed": false
+}

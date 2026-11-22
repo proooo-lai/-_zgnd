@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from storybook.providers import ProviderError
+from storybook.schema import write_json
 from storybook.server import create_app
 from tests.test_server import settings_for
 from tests.test_interaction import ScriptedProvider,make_book
@@ -54,6 +55,37 @@ def test_background_does_not_invent_unprovided_story_facts(tmp_path):
             json={'session_id':'main','request_id':str(uuid.uuid4())}).json()
         assert result['uncertain'] and result['background_state']=='unconfirmed' and result['evidence']==[]
         assert app.state.object_agents.get('synthetic',agent,'main')['status']=='ready'
+
+
+def test_background_preserves_clicked_visual_reference_as_context_not_story_evidence(tmp_path):
+    provider=ScriptedProvider([{'answer':'The apple is under the tree.','evidence_scope':'book',
+        'evidence_pages':[1],'uncertain':False}],enabled=('chat',))
+    app=create_app(settings_for(tmp_path),provider);make_book(app.state.store)
+    with TestClient(app) as client:
+        agent=create(client)['agent']['id']
+        result=client.post(f'/api/books/synthetic/object-agents/{agent}/background',
+            json={'session_id':'main','request_id':str(uuid.uuid4())})
+        assert result.status_code==200 and result.json()['background_state']=='supported'
+        context=json.loads(next(line for line in provider.calls[0]['prompt'].splitlines()
+                                if line.startswith('{"book_title"')))
+        assert context['selected_object']['visual_reference_only']=='It is red.'
+        assert context['book_evidence'][0]['text']=='A red apple is under the tree.'
+        assert app.state.store.history('synthetic','main')==[]
+
+
+def test_old_background_without_current_context_version_is_not_reused(tmp_path):
+    provider=ScriptedProvider([{'answer':'The apple is under the tree.','evidence_scope':'book',
+        'evidence_pages':[1],'uncertain':False}],enabled=('chat',))
+    app=create_app(settings_for(tmp_path),provider);make_book(app.state.store)
+    with TestClient(app) as client:
+        agent=create(client)['agent']['id'];agents=app.state.object_agents
+        context=agents.get('synthetic',agent,'main')
+        context['background_result']={'answer':'Old missing identity result.','uncertain':True,'evidence':[]}
+        write_json(agents.directory('synthetic',agent)/'context.json',context)
+        result=client.post(f'/api/books/synthetic/object-agents/{agent}/background',
+            json={'session_id':'main','request_id':str(uuid.uuid4())}).json()
+        assert result['background_execution']=='live' and result['background_state']=='supported'
+        assert result['answer']=='The apple is under the tree.'
 
 
 def test_temporary_verification_failure_can_be_retried_for_the_same_object(tmp_path):

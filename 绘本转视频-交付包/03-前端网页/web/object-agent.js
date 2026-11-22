@@ -4,6 +4,49 @@ window.ObjectAssistant = (() => {
   let current = null, sequence = 0, pcm = null, audioEpoch = 0;
   const audio = new Audio();
   const panel = $("object-agent");
+  const handle = $("object-drag-handle");
+  let drag = null;
+  function place(left, top) {
+    const viewport=window.visualViewport;
+    const x=viewport?.offsetLeft||0,y=viewport?.offsetTop||0;
+    const width=viewport?.width||window.innerWidth,height=viewport?.height||window.innerHeight;
+    panel.style.maxWidth=Math.max(1,width-20)+"px";
+    panel.style.maxHeight="min(650px, "+Math.max(1,height-20)+"px)";
+    const rect=panel.getBoundingClientRect();
+    panel.style.left=Math.max(x+10,Math.min(left,x+width-rect.width-10))+"px";
+    panel.style.top=Math.max(y+10,Math.min(top,y+height-rect.height-10))+"px";
+    panel.style.right="auto";panel.style.bottom="auto";
+  }
+  function keepVisible() {
+    if(panel.classList.contains("hidden"))return;
+    const rect=panel.getBoundingClientRect();place(rect.left,rect.top);
+  }
+  function endDrag(event) {
+    if(!drag||event&&event.pointerId!==drag.id)return;
+    const id=drag.id;drag=null;panel.classList.remove("dragging");
+    if(handle.hasPointerCapture?.(id))handle.releasePointerCapture(id);
+  }
+  handle.onpointerdown=event=>{
+    if(event.button!==0||event.isPrimary===false||event.target.closest("button,a,input,textarea,select"))return;
+    const rect=panel.getBoundingClientRect();drag={id:event.pointerId,x:event.clientX-rect.left,y:event.clientY-rect.top};
+    handle.setPointerCapture(event.pointerId);panel.classList.add("dragging");event.preventDefault();
+  };
+  handle.onpointermove=event=>{
+    if(drag&&event.pointerId===drag.id){event.preventDefault();place(event.clientX-drag.x,event.clientY-drag.y);}
+  };
+  handle.onpointerup=handle.onpointercancel=handle.onlostpointercapture=endDrag;
+  handle.onkeydown=event=>{
+    if(event.target!==handle)return;
+    const delta={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[event.key];
+    if(!delta)return;
+    event.preventDefault();event.stopPropagation();const rect=panel.getBoundingClientRect(),step=event.shiftKey?40:12;
+    place(rect.left+delta[0]*step,rect.top+delta[1]*step);
+  };
+  window.addEventListener("resize",keepVisible);
+  window.visualViewport?.addEventListener("resize",keepVisible);
+  window.visualViewport?.addEventListener("scroll",keepVisible);
+  document.addEventListener("fullscreenchange",keepVisible);
+  if(window.ResizeObserver)new ResizeObserver(keepVisible).observe(panel);
   const live = (view, revision = view.revision) => current === view && view.revision === revision;
   const message = text => { $("object-status").textContent = text; };
   const path = (view, suffix = "") => "/api/books/" + encodeURIComponent(view.bookId) + "/object-agents" + (view.agentId && (view.ready || suffix === "/cancel") ? "/" + encodeURIComponent(view.agentId) : "") + suffix;
@@ -13,6 +56,7 @@ window.ObjectAssistant = (() => {
     $("object-send").disabled = working || !view.ready || Boolean(view.mic);
     $("object-question").disabled = !view.ready;
     $("object-microphone").disabled = working || !view.ready;
+    $("object-background-retry").disabled = working || !view.ready || Boolean(view.mic);
     $("object-stop").classList.toggle("hidden", !working);
   }
   function turn(role, text, uncertain = false) {
@@ -156,16 +200,19 @@ window.ObjectAssistant = (() => {
   }
   async function background(view) {
     const revision=view.revision;
+    $("object-background-retry").classList.add("hidden");
     message("正在查找这个对象的原书背景与关系…");
     try {
       const result=await request(view,"/background",{session_id:view.parent,voice:view.voice},{kind:"object_background",started:performance.now()},null,false);
       if(!live(view,revision)||!result)return;
       render(view,result,"相关介绍与背景");
+      if(result.evidence_validation?.reason==="verifier_unavailable_or_invalid")$("object-background-retry").classList.remove("hidden");
       message(result.background_state==="supported"?"背景介绍完成，可展开原书依据核对，或继续提问。":"原书背景暂无法确认，可核对原书或继续提问。");
     } catch(error) {
       if(live(view,revision)){
         const row=turn("assistant","背景介绍暂未完成："+(error.name==="AbortError"?"等待超时，可继续提问。":error.message),true);
         row.children[0].textContent="相关介绍与背景";
+        $("object-background-retry").classList.remove("hidden");
         message("对象已识别，背景介绍暂不可用，仍可向它提问。");
       }
     }
@@ -176,6 +223,7 @@ window.ObjectAssistant = (() => {
     const revision=view.revision;
     view.agent={id:view.agentId,session_id:view.agentId};
     panel.classList.remove("hidden");$("object-title").textContent="正在认识这个朋友…";$("object-avatar").removeAttribute("src");
+    $("object-background-retry").classList.add("hidden");keepVisible();
     $("object-history").replaceChildren();$("object-question").value="";controls(view,true);message("视频已暂停，正在识别点选对象…");
     const context={kind:"touch",started:performance.now()};unlock();
     try {
@@ -204,6 +252,7 @@ window.ObjectAssistant = (() => {
     return fetch(path(view,"/cancel")+"?session_id="+encodeURIComponent(view.parent)+"&request_id="+encodeURIComponent(requestId),{method:"POST",keepalive:true}).catch(()=>{});
   }
   function close(focus=true) {
+    endDrag();
     const view=current;current=null;
     if(view){view.revision++;view.controller?.abort();cancelServer(view);stopMic(view,true);}
     stopAudio();panel.classList.add("hidden");
@@ -267,6 +316,11 @@ window.ObjectAssistant = (() => {
   $("object-form").onsubmit=async event=>{event.preventDefault();const view=current,question=$("object-question").value.trim();if(!view?.ready||view.working||view.mic||!question)return;$("object-question").value="";await submit(view,"/ask/stream",{question,session_id:view.parent,voice:view.voice},{kind:"text",started:performance.now()},turn("user",question));};
   $("object-microphone").onclick=async()=>{const view=current;if(view)await(view.mic?stopMic(view):startMic(view));};
   $("object-close").onclick=()=>close();$("object-stop").onclick=interrupt;
+  $("object-background-retry").onclick=async()=>{
+    const view=current;if(!view?.ready||view.working||view.mic||view.openingMic)return;
+    view.revision++;const revision=view.revision;stopAudio();controls(view,true);
+    try{await background(view);}finally{if(live(view,revision))controls(view,false);}
+  };
   panel.onclick=event=>event.stopPropagation();panel.onkeydown=event=>{event.stopPropagation();if(event.key==="Escape"){event.preventDefault();close();}};
   window.addEventListener("beforeunload",()=>close(false));
   return {open,close,stopAudio};

@@ -17,7 +17,7 @@
       <nav id="library" class="library" aria-label="绘本书架"><p class="muted">正在读取书架…</p></nav>
       <div class="sidebar-footer">
         <div class="local-mark"><i></i> 在本机阅读与演示</div>
-        <p>故事有据可查，回答保留依据。<br>儿童内容由负责人完成复核。</p>
+        <p>故事有据可查，回答保留依据。</p>
         <button id="screen-record" class="button subtle wide" type="button">◉ 录制交互演示</button>
         <label class="check small"><input type="checkbox" id="record-mic"> 录屏同时收录麦克风</label>
         <p id="record-status" class="small muted" role="status">连续录屏保存为 WebM；提交前用配套工具导出 MP4。</p>
@@ -37,8 +37,7 @@
       </dialog>
       <section id="job-panel" class="panel job-panel hidden" aria-live="polite"><div class="job-heading"><div><span class="eyebrow">正在一起完成这本书</span><h2 id="job-message">正在上传绘本…</h2></div><div class="job-heading-actions"><button id="cancel-job" class="button subtle" type="button">取消生成</button><strong id="job-percent">0%</strong></div></div><div class="progress-track"><div id="job-progress"></div></div><ol class="agent-stages"><li><span>01</span> 图文理解</li><li><span>02</span> 故事编排</li><li><span>03</span> 画面与配音</li><li><span>04</span> 建立检索</li></ol><div id="job-events" class="job-events"></div></section>
       <section id="reader" class="hidden">
-        <div class="book-heading"><div><h1 id="book-title"></h1></div><div class="book-badges"><span id="lang-badge" class="badge"></span><span id="mode-badge" class="badge"></span><span id="review-badge" class="badge warning"></span></div></div>
-        <div id="book-warnings" class="notice hidden"></div>
+        <div class="book-heading"><div><h1 id="book-title"></h1></div><div class="book-badges"><span id="lang-badge" class="badge"></span></div></div>
         <div class="reading-layout">
           <section class="player-panel panel" aria-label="绘本视频播放器">
             <div class="book-sheet">
@@ -72,7 +71,7 @@
   <div id="toast" class="toast hidden" role="alert"></div><audio id="response-audio" preload="auto"></audio>
   <script src="/language.js?v=3" defer></script>
   <script src="/video-annotations.js?v=3" defer></script>
-  <script src="/app.js?v=56" defer></script>
+  <script src="/app.js?v=57" defer></script>
   <script src="/object-agent.js?v=5" defer></script>
 </body>
 </html>

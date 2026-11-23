@@ -206,7 +206,7 @@ window.ObjectAssistant = (() => {
       const result=await request(view,"/background",{session_id:view.parent,voice:view.voice},{kind:"object_background",started:performance.now()},null,false);
       if(!live(view,revision)||!result)return;
       render(view,result,"相关介绍与背景");
-      if(result.evidence_validation?.reason==="verifier_unavailable_or_invalid")$("object-background-retry").classList.remove("hidden");
+      if(result.background_state!=="supported")$("object-background-retry").classList.remove("hidden");
       message(result.background_state==="supported"?"背景介绍完成，可展开原书依据核对，或继续提问。":"原书背景暂无法确认，可核对原书或继续提问。");
     } catch(error) {
       if(live(view,revision)){

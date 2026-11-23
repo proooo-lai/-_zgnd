@@ -115,7 +115,10 @@ def test_vision_only_background_uses_original_book_images_and_is_available(tmp_p
         result=client.post(f"/api/books/synthetic/object-agents/{child['agent']['id']}/background",json={
             'session_id':'main','request_id':str(uuid.uuid4())}).json()
         assert not result['uncertain'] and result['background_state']=='supported'
-        assert all('/pages/' in str(image) for call in provider.calls for image in call['images'])
+        for call in provider.calls:
+            assert call['images'][0].name == 'frame.jpg'
+            assert any(image.parent.name == 'pages' for image in call['images'])
+            assert 'reference_only_not_book_evidence' in call['prompt']
 
 
 @pytest.mark.parametrize('extra', [{'question':'Invent a past.'}, {'time':70}, {'frame':'spoof'}])
@@ -179,3 +182,85 @@ def test_cancelled_background_keeps_recognized_target_without_caching_a_result(t
     context=agents.get('synthetic',agent,'main')
     assert context['status']=='ready' and 'background_result' not in context
     assert app.state.store.history('synthetic','main')==[]
+
+
+def test_background_checks_target_against_source_images_even_when_chat_is_available(tmp_path,monkeypatch):
+    class VisualBackground(ScriptedProvider):
+        def __init__(self):
+            super().__init__(enabled=('vision','chat'));self.drafts=[];self.reviews=[]
+        async def chat(self,prompt):
+            raise AssertionError('Object identity needs source-image comparison, not text-only inference')
+        async def vision(self,prompt,images):
+            record={'prompt':prompt,'images':list(images)}
+            if 'ANSWER_VERIFICATION_V1' in prompt:
+                self.reviews.append(record)
+                return {'supported':True,'evidence_scope':'book','uncertain':False,
+                        'evidence_pages':[1],'reason':'The source illustration and text support the scene.'}
+            self.drafts.append(record)
+            return {'answer':'The apple is under the tree.','evidence_scope':'book','evidence_pages':[1],'uncertain':False}
+    provider=VisualBackground();app=create_app(settings_for(tmp_path),provider);make_book(app.state.store)
+    monkeypatch.setattr('storybook.interaction.rank_pages',lambda pages,*args: list(reversed(pages)))
+    with TestClient(app) as client:
+        agent=create(client)['agent']['id']
+        result=client.post(f'/api/books/synthetic/object-agents/{agent}/background',
+            json={'session_id':'main','request_id':str(uuid.uuid4())}).json()
+    assert result['background_state']=='supported',result
+    assert len(provider.drafts)==len(provider.reviews)==1
+    for call in provider.drafts+provider.reviews:
+        assert call['images'][0].name=='frame.jpg'
+        assert any(p.name=='0001.png' and p.parent.name=='pages' for p in call['images'])
+        assert 'reference_only_not_book_evidence' in call['prompt']
+    draft=json.loads(next(l for l in provider.drafts[0]['prompt'].splitlines() if l.startswith('{"book_title"')))
+    assert draft['priority_pages'][0]==1
+    assert not result.get('seek_time') and not result['boxes']
+    assert app.state.store.history('synthetic','main')==[]
+
+
+def test_unconfirmed_background_is_retryable_and_not_saved_as_permanent_answer(tmp_path):
+    provider=ScriptedProvider([
+        {'answer':'I cannot confirm its name.','evidence_scope':'book','evidence_pages':[1],'uncertain':True},
+        {'answer':'The apple is under the tree.','evidence_scope':'book','evidence_pages':[1],'uncertain':False}])
+    app=create_app(settings_for(tmp_path),provider);make_book(app.state.store)
+    with TestClient(app) as client:
+        agent=create(client)['agent']['id'];path=f'/api/books/synthetic/object-agents/{agent}/background'
+        first=client.post(path,json={'session_id':'main','request_id':str(uuid.uuid4())}).json()
+        assert first['background_state']=='unconfirmed'
+        assert 'background_result' not in app.state.object_agents.get('synthetic',agent,'main')
+        second=client.post(path,json={'session_id':'main','request_id':str(uuid.uuid4())}).json()
+        assert second['background_state']=='supported' and second['background_execution']=='live'
+        assert second['turn_id']!=first['turn_id']
+
+
+@pytest.mark.parametrize('scope,supported,uncertain,reason',[
+    ('current_frame',True,False,'evidence_scope_mismatch'),
+    ('book',False,False,'evidence_does_not_support_answer'),
+    ('book',True,True,'evidence_does_not_support_answer'),
+])
+def test_background_vision_must_independently_confirm_source_evidence(tmp_path,scope,supported,uncertain,reason):
+    class WrongScope(ScriptedProvider):
+        async def vision(self,prompt,images):
+            if 'ANSWER_VERIFICATION_V1' in prompt:
+                return {'supported':supported,'evidence_scope':scope,'uncertain':uncertain,
+                        'evidence_pages':[1],'reason':'The video target does not establish this book fact.'}
+            return {'answer':'The apple is under the tree.','evidence_scope':'book','evidence_pages':[1],'uncertain':False}
+    provider=WrongScope(enabled=('vision',));app=create_app(settings_for(tmp_path),provider);make_book(app.state.store)
+    with TestClient(app) as client:
+        agent=create(client)['agent']['id']
+        result=client.post(f'/api/books/synthetic/object-agents/{agent}/background',
+            json={'session_id':'main','request_id':str(uuid.uuid4())}).json()
+    assert result['background_state']=='unconfirmed' and not result['evidence']
+    assert result['evidence_validation']['reason']==reason
+    assert 'background_result' not in app.state.object_agents.get('synthetic',agent,'main')
+
+
+def test_missing_original_images_cannot_promote_video_reference_to_background_evidence(tmp_path):
+    provider=ScriptedProvider(enabled=('vision','chat'))
+    app=create_app(settings_for(tmp_path),provider);make_book(app.state.store)
+    with TestClient(app) as client:
+        agent=create(client)['agent']['id']
+        for image in (app.state.store.directory('synthetic')/'pages').glob('*.png'):
+            image.unlink()
+        result=client.post(f'/api/books/synthetic/object-agents/{agent}/background',
+            json={'session_id':'main','request_id':str(uuid.uuid4())}).json()
+    assert result['background_state']=='unconfirmed' and result['evidence']==[]
+    assert provider.calls==[]

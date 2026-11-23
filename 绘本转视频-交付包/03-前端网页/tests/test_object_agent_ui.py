@@ -186,3 +186,13 @@ def test_missing_book_and_provider_errors_do_not_claim_the_backend_is_outdated()
         assert any(detail in text for text in result["texts"])
         assert "重启" not in result["status"]
         assert "正在认识" not in result["title"]
+
+
+def test_unconfirmed_background_offers_retry_without_reclicking_target():
+    result = run_ui(r'''
+const calls=[];let attempts=0;
+fetch=async(path,options)=>{if(path.includes('/cancel?'))return response({cancelled:true});calls.push(path);const body=JSON.parse(options.body);if(path.endsWith('/background')){attempts++;return response(attempts===1?{answer:'No confirmed story yet.',uncertain:true,background_state:'unconfirmed',evidence_validation:{reason:'uncertain_or_invalid_references'}}:{answer:'The apple is under the tree.',background_state:'supported'})}const data=child(body.agent_id,'apple');data.agent.background_available=true;return response(data)};
+(async()=>{await ObjectAssistant.open(snapshot);const offered=!$('object-background-retry').classList.contains('hidden');await $('object-background-retry').onclick();console.log(JSON.stringify({offered,calls,title:$('object-title').textContent,hidden:$('object-background-retry').classList.contains('hidden'),disabled:$('object-send').disabled}));ObjectAssistant.close()})()
+''')
+    assert result['offered'] and result['hidden'] and not result['disabled']
+    assert result['calls'][1]==result['calls'][2] and 'apple' in result['title']

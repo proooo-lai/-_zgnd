@@ -16,7 +16,7 @@ from PIL import Image
 from .interaction import selected_object
 from .schema import write_json
 
-BACKGROUND_VERSION = "object-background-language-v3"
+BACKGROUND_VERSION = "object-background-source-visual-v4"
 
 
 class ObjectAgents:
@@ -137,22 +137,20 @@ class ObjectAgents:
             if context.get("background_result", {}).get("background_version") == BACKGROUND_VERSION:
                 return {**context["background_result"], "background_execution": "reused_same_object"}
             english = self.store.book(book_id).get('language') == 'en'
-            question = ("Using only traceable evidence from the original book, introduce this object's story background, events and relationships, and cite the supporting pages. "
-                        "Do not substitute its appearance, general knowledge or previous answers for book evidence. "
-                        "State clearly when its past, motives or origins cannot be confirmed. Answer in English."
+            question = ("Using evidence from the original book, briefly introduce this object's confirmed role or event on the current page and cite the supporting pages. "
+                        "Explain a story connection only when the source supports it. Its name, motives and past are not required; omit unknown details. "
+                        "Do not substitute its appearance, general knowledge or previous answers for book evidence. Answer in English."
                         if english else
-                        "请仅根据原书可定位的证据，介绍它在故事里的相关背景、情节和角色关系，并给出支持介绍的原书页码。"
-                        "不以外貌、百科常识或之前的介绍代替故事证据；对没有证据的经历、动机和身世明确说明无法确认，不要编造。")
+                        "请根据原书证据，用一至三句话介绍这个对象在当前原书页中可确认的情节或作用，并引用支持页码。"
+                        "有可靠证据时再补充故事关系。姓名、动机和身世不是必答项，未知就不补写；"
+                        "不以外貌、百科常识或之前的介绍代替故事证据。")
             result = await self.interactor.ask(book_id, question, **self.parameters(book_id, agent_id, parent),
                                                input_kind="object_background", voice=voice)
             result.update(background_state="supported" if not result.get("uncertain") and result.get("evidence") else "unconfirmed",
                           background_execution="live", background_version=BACKGROUND_VERSION)
             self.store.update_turn(book_id, agent_id, result["turn_id"],
                                    {key: result[key] for key in ("background_state", "background_execution", "background_version")})
-            validation = result.get("evidence_validation", {})
-            reusable = validation.get("decision") == "supported" or validation.get("reason") in (
-                "uncertain_or_invalid_references", "evidence_does_not_support_answer")
-            if reusable:
+            if result["background_state"] == "supported":
                 context["background_result"] = result
                 write_json(self.directory(book_id, agent_id) / "context.json", context)
             return result

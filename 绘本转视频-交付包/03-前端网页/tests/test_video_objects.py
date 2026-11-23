@@ -25,7 +25,7 @@ def test_user_location_query_does_not_fall_through_to_book_question_answering(tm
     from storybook.video_objects import VideoObjectLocator
     store=Store(tmp_path);make_book(store,generated=True)
     seen=[]
-    async def search(self,book,target,timestamp,folder):
+    async def search(self,book,target,timestamp,folder,*,language="zh"):
         seen.append(target)
         return {'answer':'已框选视频中的目标。','uncertain':False,'boxes':[], 'object_location':{'status':'found'}}
     monkeypatch.setattr(VideoObjectLocator,'search',search)

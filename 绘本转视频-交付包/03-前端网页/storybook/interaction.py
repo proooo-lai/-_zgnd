@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from .answer_validation import AnswerDraft, EvidenceVerdict, VERIFIER_VERSION
 from .grounding import ClickObservation, PixelVerdict, click_pixel_detail, mark_click, pointed_frame
+from .language import response_language, text_language
 from .followup import draft_followup, joined
 from .providers import ANSWER_CALLBACK, ANSWER_VOICE, ProviderError
 from .safety import UNTRUSTED_CONTENT_RULE, redact_privacy, safety_check
@@ -37,18 +38,10 @@ def tokens(text):
     return words + [han[i:i + 2] for i in range(len(han) - 1)]
 
 
-def response_language(question):
-    if re.search(r"用英[文语]|英[文语]回答|(?:answer|reply|respond)\s+in\s+English", question, re.I):
-        return "en"
-    if re.search(r"用中[文语]|中文回答|(?:answer|reply|respond)\s+in\s+Chinese", question, re.I):
-        return "zh"
-    return "zh" if re.search(r"[\u4e00-\u9fff]", question) else "en"
-
-
 def object_introduction(obj, language):
-    label = str(obj.get("label", "")).strip()
+    label = str(obj.get("label_en" if language == "en" else "label_zh") or obj.get("label", "")).strip()
     description = str(obj.get("description", "")).strip()
-    if description.casefold() == label.casefold():
+    if description.casefold() == label.casefold() or (description and text_language(description) != language):
         description = ""
     return (f"This is {label}." + (" " + description if description else "")) if language == "en" else f"这是{label}。{description}"
 
@@ -194,7 +187,10 @@ class Interactor:
             await emit("audio_pcm", {**payload, "stream_id": f"{turn_id}-{index}", "turn_id": turn_id, "text": text})
 
         voice = ANSWER_VOICE.get()
-        use_stream = emit and getattr(self.provider, "tts_stream", None) and self.provider.mode("tts") == "dashscope"
+        tts_mode = self.provider.mode("tts")
+        if not voice and tts_mode == "dashscope":
+            voice = "Ethan" if language == "en" else "Cherry"
+        use_stream = emit and getattr(self.provider, "tts_stream", None) and tts_mode == "dashscope"
         if use_stream:
             audio = await self.provider.tts_stream(text, language, output, pcm, voice)
         else:
@@ -251,7 +247,7 @@ class Interactor:
         if self.provider.available("tts") and answer:
             speech_started = time.perf_counter()
             try:
-                language = "zh" if re.search(r"[\u4e00-\u9fff]", answer) else "en"
+                language = text_language(answer)
                 first = await early_task if early_task else None
                 chunks = [first] if first else []
                 result["audio_chunks"] = chunks
@@ -319,10 +315,11 @@ class Interactor:
             sentence = redact_privacy(sentence)
 
             async def speak_first():
-                language = "zh" if re.search(r"[\u4e00-\u9fff]", sentence) else "en"
+                language = text_language(sentence)
                 return await self._speak(book_id, sentence, language, folder / "first.wav", turn_id, 0, emit)
             early_task = asyncio.create_task(speak_first())
         scene = scene_at(book, timestamp)
+        language = response_language(question)
         current = scene["page_number"] if scene else None
         prior = self.store.history(book_id, session_id, limit=12)
         selected = selected_object([focus_turn] if focus_turn else prior, current, timestamp)
@@ -338,20 +335,23 @@ class Interactor:
             # A short subjectless follow-up in an object window refers to its target.
             refers_to_selection = refers_to_selection or bool(re.match(r"^(?:在?干什么|在?做什么|怎么了|为什么|why\b|doing\b)", question, re.I))
         if safety_check(question)["blocked"]:
-            return await self._finish(book, session_id, question, {"answer": "这个问题涉及危险内容。我们可以聊聊故事中的角色和安全的做法。", "uncertain": True}, started, turn_id, folder, input_kind)
+            return await self._finish(book, session_id, question, {"answer":
+                "This question involves unsafe content. We can talk about the story characters and safe choices."
+                if language == "en" else "这个问题涉及危险内容。我们可以聊聊故事中的角色和安全的做法。", "uncertain": True}, started, turn_id, folder, input_kind)
         if maybe_text_request(question):
             try:
                 request = await resolve_text_request(self.provider, question)
             except (ProviderError, TimeoutError):
                 return await self._finish(book, session_id, question, {
-                    "answer": "文字指令解析服务暂未完成。请把目标文字放在引号里再试。",
+                    "answer": "The text request could not be parsed. Please put the exact target text in quotation marks and try again."
+                    if language == "en" else "文字指令解析服务暂未完成。请把目标文字放在引号里再试。",
                     "uncertain": True, "success": False, "status": "text_request_unconfirmed"
                 }, started, turn_id, folder, input_kind)
             return await self._locate_video_text(book, request, timestamp, folder, session_id, question,
                                                  started, turn_id, input_kind)
         target = object_request(question)
         if target and not focus_turn:
-            result = await VideoObjectLocator(self.provider, self.frame).search(book, target, timestamp, folder)
+            result = await VideoObjectLocator(self.provider, self.frame).search(book, target, timestamp, folder, language=language)
             return await self._finish(book, session_id, question, result, started, turn_id, folder, input_kind)
         story_followup = bool(refers_to_selection and re.search(
             r"干什么|做什么|怎么了|为什么|doing|happened|why", question, re.I)
@@ -467,9 +467,11 @@ class Interactor:
 
     async def _locate_video_text(self, book, request, timestamp, folder, session_id, question, started, turn_id, input_kind):
         if request:
-            result = await VideoTextLocator(self.provider, self.frame).search(book, request, timestamp, folder)
+            result = await VideoTextLocator(self.provider, self.frame).search(book, request, timestamp, folder,
+                                                                            language=response_language(question))
         else:
-            result = {"answer": "请说出需要在视频中查找或高亮的具体文字，最好用引号括起来。",
+            result = {"answer": ("Please specify the exact text to find or highlight in the video, preferably in quotation marks."
+                      if response_language(question) == "en" else "请说出需要在视频中查找或高亮的具体文字，最好用引号括起来。"),
                       "uncertain": True, "success": False, "status": "text_target_required"}
         # Return audio with the final result so the player can display the reviewed frame first.
         return await self._finish(book, session_id, question, result, started, turn_id, folder, input_kind)
@@ -551,6 +553,9 @@ class Interactor:
             elif reason == "verifier_unavailable_or_invalid":
                 answer = ("The answer review service could not complete this turn. Please try again later." if language == "en"
                           else "本轮答案复核服务未能完成，暂时不能确认回答，请稍后重试。")
+            elif reason == "answer_language_mismatch":
+                answer = ("The answer did not use the requested language. Please try again."
+                          if language == "en" else "本轮回答未使用要求的语言，请重试。")
             return {"answer": answer, "evidence_pages": [], "uncertain": True,
                     "evidence_scope": "current_frame" if reason == "current_frame_cannot_be_verified" else "book",
                     "_validation": {"decision": "rejected", "reason": reason, "version": VERIFIER_VERSION}}
@@ -561,6 +566,8 @@ class Interactor:
             draft = AnswerDraft.model_validate(raw)
         except ValidationError:
             return refuse("invalid_answer_schema")
+        if text_language(draft.answer) != language:
+            return refuse("answer_language_mismatch")
         needs_story = bool(context and context.get("story_followup"))
         if needs_story:
             story = draft.story_context
@@ -569,6 +576,8 @@ class Interactor:
             if (story.uncertain or not story.answer.strip() or not story.evidence_pages
                     or any(not page_by_number(book, n) for n in story.evidence_pages)):
                 return refuse("story_context_unconfirmed")
+            if text_language(story.answer) != language:
+                return refuse("answer_language_mismatch")
             detail = story.answer.strip()
             if not detail.startswith(("故事里", "故事中")) and not detail.lower().startswith("in the story"):
                 detail = ("In the story, " if language == "en" else "故事里，") + detail
@@ -748,6 +757,7 @@ class Interactor:
         ANSWER_VOICE.set(voice)
         started = time.perf_counter()
         book = self.store.book(book_id)
+        english = book.get("language") == "en"
         folder = self.store.directory(book_id) / "turns" / turn_id
         folder.mkdir(parents=True, exist_ok=True)
         scene = scene_at(book, timestamp)
@@ -756,7 +766,8 @@ class Interactor:
         page = page_by_number(book, scene["page_number"])
         transform = scene.get("transform", {})
         match = None
-        result = {"answer": "这个位置没有足够清晰的可识别对象，请点一下画面中的人物或物品。", "uncertain": True,
+        result = {"answer": ("I cannot clearly identify an object at this point. Please click a character or object in the picture."
+                             if english else "这个位置没有足够清晰的可识别对象，请点一下画面中的人物或物品。"), "uncertain": True,
                   "boxes": [], "evidence": self._evidence(book, [page["number"]]),
                   "interaction_page": page["number"], "interaction_time": timestamp,
                   "interaction_point": [x, y]}
@@ -765,7 +776,8 @@ class Interactor:
             if point is None:
                 if frame:
                     safe_frame(frame, folder / "frame.jpg")
-                result["answer"] = "你点击的是画面留白处，请点绘本画面中的人物或物品。"
+                result["answer"] = ("You clicked outside the picture. Please click a character or object in the picture."
+                                    if english else "你点击的是画面留白处，请点绘本画面中的人物或物品。")
                 return await self._finish(book, session_id, f"点击视频 {timestamp:.2f}s 的留白", result, started, turn_id, folder, "touch")
             if point:
                 candidates = [obj for obj in page.get("objects", []) if obj["bbox"][0] <= point[0] <= obj["bbox"][0] + obj["bbox"][2]
@@ -792,6 +804,8 @@ class Interactor:
                 '本次没有裁剪图。所有框只相对整幅图；禁止把框变成点击点的小框。'
                 '只返回JSON {"found":true,"label":"名称","description":"描述","coordinate_space":"full_frame",'
                 '"bbox_1000":[左上x,左上y,右下x,右下y],"confidence":0.9}。坐标0到1000整数端点，false时bbox_1000=[]。')
+            prompt += ('\nWrite label and description in English.' if book.get('language') == 'en'
+                       else '\nlabel和description均用中文。')
             raw = await self.provider.vision(prompt, images)
             try:
                 observation = ClickObservation.model_validate(raw)
@@ -835,7 +849,8 @@ class Interactor:
         elif frame:
             safe_frame(frame, folder / "frame.jpg")
         if not match and not self.provider.available("vision"):
-            result["answer"] = "当前页面没有覆盖这个位置的对象标注；请配置视觉模型以识别画面中的对象。"
+            result["answer"] = ("No object annotation covers this point. Please configure a vision model to identify objects in the picture."
+                                if english else "当前页面没有覆盖这个位置的对象标注；请配置视觉模型以识别画面中的对象。")
         if not result.get('object'):
             result.update(status='object_not_confirmed',success=False)
         return await self._finish(book, session_id, f"点击视频 {timestamp:.2f}s 的位置 ({x:.3f},{y:.3f})", result, started, turn_id, folder, "touch")

@@ -268,9 +268,9 @@ window.ObjectAssistant = (() => {
     if(!live(view)||view.working)return;
     view.revision++;const revision=view.revision;stopAnswer();stopAudio();unlock();controls(view,true);message("正在查找故事依据并核对回答…");
     try {
-      const result=await request(view,suffix,body,context,text=>{if(text)row.children[1].textContent=text;});
+      const result=await request(view,suffix,body,context,text=>{if(text){Language.noteHeard(text);row.children[1].textContent=text;}});
       if(!live(view,revision)||!result)return;
-      if(result.transcript)row.children[1].textContent=result.transcript;
+      if(result.transcript){Language.noteHeard(result.transcript);row.children[1].textContent=result.transcript;}
       const complete=render(view,result);message(result.uncertain?"无法完全确认，请展开原书依据核对。":"回答完成 · 语音播放事件仅作计时参考。");
       if(complete&&!result._windowStreamedAudio&&result.audio_url){audio.src=safeURL(result.audio_url)||"";audio.onplaying=()=>metric(view,context,result.turn_id,"audio_playing");audio.play().catch(()=>message("点击“播放回答”收听。"));}
     } catch(error) {
@@ -313,7 +313,7 @@ window.ObjectAssistant = (() => {
     const form=new FormData();form.append("audio",encodeWav(samples,rate),"object-question.wav");form.append("session_id",view.parent);if(view.voice)form.append("voice",view.voice);
     const row=turn("user","语音提问，正在转写…");await submit(view,"/voice/stream",form,{kind:"mic",started:mic.lastVoice},row);
   }
-  $("object-form").onsubmit=async event=>{event.preventDefault();const view=current,question=$("object-question").value.trim();if(!view?.ready||view.working||view.mic||!question)return;$("object-question").value="";await submit(view,"/ask/stream",{question,session_id:view.parent,voice:view.voice},{kind:"text",started:performance.now()},turn("user",question));};
+  $("object-form").onsubmit=async event=>{event.preventDefault();const view=current,question=$("object-question").value.trim();if(!view?.ready||view.working||view.mic||!question)return;$("object-question").value="";Language.noteHeard(question);await submit(view,"/ask/stream",{question,session_id:view.parent,voice:view.voice||Language.ttsVoice()},{kind:"text",started:performance.now()},turn("user",question));};
   $("object-microphone").onclick=async()=>{const view=current;if(view)await(view.mic?stopMic(view):startMic(view));};
   $("object-close").onclick=()=>close();$("object-stop").onclick=interrupt;
   $("object-background-retry").onclick=async()=>{

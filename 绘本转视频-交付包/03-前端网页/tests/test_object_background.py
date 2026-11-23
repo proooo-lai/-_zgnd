@@ -37,7 +37,7 @@ def test_background_uses_frozen_target_and_source_evidence_and_is_reused(tmp_pat
         assert 'selected_object' in prompt and 'apple' in prompt
         context=json.loads(next(line for line in prompt.splitlines() if line.startswith('{"book_title"')))
         assert context['current_time']==10 and context['selected_object']['label']=='apple'
-        assert '原书' in context['question'] and '故事' in context['question']
+        assert 'original book' in context['question'] and 'story' in context['question']
         assert app.state.store.history('synthetic','main')==[]
         turns=app.state.store.history('synthetic',agent)
         assert len(turns)==2 and turns[-1]['input_kind']=='object_background'

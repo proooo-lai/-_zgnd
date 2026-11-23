@@ -32,7 +32,8 @@ const child=(id,label)=>({agent:{id,session_id:id,label,time:8,page_number:1,ava
 const flush=()=>new Promise(r=>setImmediate(r));
 '''
     source = SOURCE.read_text() if SOURCE.exists() else ""
-    process = subprocess.run([runtime, "-e", setup + source + "\n" + scenario], text=True, capture_output=True)
+    language = (SOURCE.parent / 'language.js').read_text()
+    process = subprocess.run([runtime, "-e", setup + language + source + "\n" + scenario], text=True, capture_output=True)
     assert process.returncode == 0, process.stderr
     return json.loads(process.stdout)
 

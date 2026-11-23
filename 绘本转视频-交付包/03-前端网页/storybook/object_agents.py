@@ -16,7 +16,7 @@ from PIL import Image
 from .interaction import selected_object
 from .schema import write_json
 
-BACKGROUND_VERSION = "object-background-context-v2"
+BACKGROUND_VERSION = "object-background-language-v3"
 
 
 class ObjectAgents:
@@ -136,7 +136,12 @@ class ObjectAgents:
             context = self.get(book_id, agent_id, parent)
             if context.get("background_result", {}).get("background_version") == BACKGROUND_VERSION:
                 return {**context["background_result"], "background_execution": "reused_same_object"}
-            question = ("请仅根据原书可定位的证据，介绍它在故事里的相关背景、情节和角色关系，并给出支持介绍的原书页码。"
+            english = self.store.book(book_id).get('language') == 'en'
+            question = ("Using only traceable evidence from the original book, introduce this object's story background, events and relationships, and cite the supporting pages. "
+                        "Do not substitute its appearance, general knowledge or previous answers for book evidence. "
+                        "State clearly when its past, motives or origins cannot be confirmed. Answer in English."
+                        if english else
+                        "请仅根据原书可定位的证据，介绍它在故事里的相关背景、情节和角色关系，并给出支持介绍的原书页码。"
                         "不以外貌、百科常识或之前的介绍代替故事证据；对没有证据的经历、动机和身世明确说明无法确认，不要编造。")
             result = await self.interactor.ask(book_id, question, **self.parameters(book_id, agent_id, parent),
                                                input_kind="object_background", voice=voice)

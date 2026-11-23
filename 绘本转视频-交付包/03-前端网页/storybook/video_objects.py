@@ -63,12 +63,12 @@ class VideoObjectLocator:
     def __init__(self, provider, frame_reader):
         self.provider, self.frame_reader = provider, frame_reader
 
-    async def search(self, book, target, timestamp, folder):
+    async def search(self, book, target, timestamp, folder, *, language='zh'):
         folder = Path(folder)/'object-location'
         folder.mkdir(parents=True, exist_ok=True)
         audit = {'version': VERSION, 'book_id': book['id'], 'target_label': target,
                  'search_scope': 'sampled_video_frames_not_exhaustive', 'sampled_frames': 0,
-                 'scene_samples': [], 'status': 'searching'}
+                 'scene_samples': [], 'status': 'searching', 'response_language': language}
         try:
             result = await asyncio.wait_for(self._search(book, target, timestamp, folder, audit), timeout=120)
         except (ProviderError, ValidationError, ValueError, OSError, RuntimeError, TimeoutError) as error:
@@ -82,7 +82,9 @@ class VideoObjectLocator:
         return result
 
     def miss(self, target, audit):
-        return {'answer': '未在本次检查的视频帧中可靠确认这个目标，暂时无法框选；这不表示全片一定没有。',
+        return {'answer': ('I could not reliably confirm this object in the checked video frames, so I cannot outline it. This does not mean it is absent from the whole video.'
+                          if audit.get('response_language') == 'en' else
+                          '未在本次检查的视频帧中可靠确认这个目标，暂时无法框选；这不表示全片一定没有。'),
                 'uncertain': True, 'success': False, 'status': 'object_not_confirmed', 'boxes': [], 'evidence': [],
                 'object_location': {'version': VERSION, 'status': 'not_confirmed', 'action': 'locate_object',
                     'target_label': target, 'search_scope': audit['search_scope'], 'sampled_frames': audit['sampled_frames']}}
@@ -150,7 +152,9 @@ class VideoObjectLocator:
                     'timestamp': when, 'frame_url': frame_url, 'frame_sha256': sha256_file(frame),
                     'frame_size': [width, height], 'search_scope': audit['search_scope'], 'sampled_frames': audit['sampled_frames']}
                 audit.update(status='found', location=location)
-                return {'answer': '已在视频帧中确认目标，请查看框选。', 'uncertain': False, 'seek_time': when,
+                return {'answer': ('The object is confirmed in the video frame. Please see the outline.'
+                                  if audit.get('response_language') == 'en' else '已在视频帧中确认目标，请查看框选。'),
+                    'uncertain': False, 'seek_time': when,
                     'boxes': [{'label': candidate.label, 'bbox': box, 'kind': 'object', 'presentation': 'outline',
                                'source': 'verified_video_frame'}], 'object_location': location,
                     'evidence': [{'source': 'verified_video_frame', 'page_number': scene.get('page_number'),

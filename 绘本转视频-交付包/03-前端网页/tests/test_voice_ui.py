@@ -73,7 +73,7 @@ def test_cancelled_old_request_cannot_unlock_or_write_into_a_new_question(failed
     interrupt=next(line for line in APP.read_text().splitlines() if line.startswith('function interruptAnswer('))
     fixture=r'''
 const state={book:{id:'book'},session:'main',busy:false},pending=[],turns=[];
-const window={ObjectAssistant:{close(){}}},videoAnnotations={clear(){}},video={currentTime:0,pause(){}},Language={ttsVoice:()=>''};
+const window={ObjectAssistant:{close(){}}},videoAnnotations={clear(){}},video={currentTime:0,pause(){}},Language={ttsVoice:()=>'',noteHeard(){}};
 const busy=value=>state.busy=value,openAssistant=()=>{},stopAnswer=()=>{},unlockAudio=()=>{},captureFrame=()=>null,status=()=>{},toast=()=>{},bookPath=x=>x;
 const addTurn=(role,text)=>turns.push({role,text}),$=()=>({value:''});
 const streamRequest=()=>new Promise((resolve,reject)=>pending.push({resolve,reject}));

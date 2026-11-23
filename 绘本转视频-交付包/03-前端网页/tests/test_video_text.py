@@ -16,7 +16,7 @@ def test_quoted_text_requests_route_to_video_pixels_not_story_answers(tmp_path,m
     store=Store(tmp_path);book=make_book(store,generated=True)
     provider=ScriptedProvider(enabled=('vision',))
     observed=[]
-    async def search(self,book,request,timestamp,folder):
+    async def search(self,book,request,timestamp,folder,*,language="zh"):
         observed.append(request.model_dump())
         return {'answer':'Located in the actual video.','uncertain':False,'boxes':[],
                 'text_location':{'status':'found','action':request.action,'target_text':request.target_text}}
@@ -127,7 +127,7 @@ def test_word_navigation_never_speaks_an_unlocated_story_draft(tmp_path,monkeypa
     provider=Speech([{'answer':'Here is the apple.','evidence_scope':'book','evidence_pages':[1],
         'uncertain':False,'seek_page':1,'target_label':'apple','target_kind':'word'}],enabled=('chat','tts'))
     store=Store(tmp_path);make_book(store,generated=True)
-    async def miss(self,*args):
+    async def miss(self,*args,**kwargs):
         return {'answer':'The sampled video frames do not confirm the word.','uncertain':True,'boxes':[],'evidence':[]}
     async def emit(*args): pass
     monkeypatch.setattr(VideoTextLocator,'search',miss)

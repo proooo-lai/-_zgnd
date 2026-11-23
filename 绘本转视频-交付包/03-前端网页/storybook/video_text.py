@@ -111,22 +111,26 @@ class VideoTextLocator:
     def __init__(self,provider,frame_reader):
         self.provider,self.frame_reader=provider,frame_reader
 
-    async def search(self,book,request,timestamp,folder):
+    async def search(self,book,request,timestamp,folder,*,language='zh'):
         folder=Path(folder)/'text-location';folder.mkdir(parents=True,exist_ok=True)
         audit={'version':VERSION,'book_id':book['id'],'request':request.model_dump(),
                'search_scope':'sampled_video_frames_not_exhaustive','sampled_frames':0,'scene_samples':[],
-               'max_scene_policy':MAX_SCENES,'max_review_policy':MAX_REVIEWS,'status':'searching'}
+               'max_scene_policy':MAX_SCENES,'max_review_policy':MAX_REVIEWS,'status':'searching',
+               'response_language':language}
         try:
             result=await asyncio.wait_for(self._search(book,request,timestamp,folder,audit),timeout=120)
         except (ProviderError,ValidationError,ValueError,OSError,RuntimeError,TimeoutError) as error:
             audit.update(status='not_confirmed',error_type=type(error).__name__)
-            result=self.miss(request,audit,'服务或视频帧核对未能完成，无法可靠定位。')
+            result=self.miss(request,audit, 'The service or frame review did not finish, so I cannot reliably locate the text.'
+                             if language=='en' else '服务或视频帧核对未能完成，无法可靠定位。')
         except asyncio.CancelledError:
             audit['status']='cancelled';write_json(folder/'search.json',audit);raise
         write_json(folder/'search.json',audit)
         return result
 
-    def miss(self,request,audit,reason='未在本次检查的视频帧中确认目标文字；这不表示全片一定没有。'):
+    def miss(self,request,audit,reason=None):
+        reason=reason or ('I could not confirm the text in the checked video frames. This does not mean it is absent from the whole video.'
+                         if audit.get('response_language')=='en' else '未在本次检查的视频帧中确认目标文字；这不表示全片一定没有。')
         return {'answer':reason,'uncertain':True,'success':False,'status':'text_not_confirmed','boxes':[], 'evidence':[],
                 'text_location':{'version':VERSION,'status':'not_confirmed','action':request.action,
                     'target_text':request.target_text,'search_scope':audit['search_scope'],'sampled_frames':audit['sampled_frames']}}
@@ -134,7 +138,8 @@ class VideoTextLocator:
     async def _search(self,book,request,timestamp,folder,audit):
         if not self.provider.available('vision'):
             audit.update(status='not_confirmed',stop_reason='vision_unconfigured')
-            return self.miss(request,audit,'需要可用的互动视觉服务才能核对视频中的文字。')
+            return self.miss(request,audit, 'A working vision service is needed to check text in the video.'
+                             if audit.get('response_language')=='en' else '需要可用的互动视觉服务才能核对视频中的文字。')
         pages={p['number']:p for p in book['pages']}
         key=text_key(request.target_text)
         def priority(scene):
@@ -203,7 +208,10 @@ class VideoTextLocator:
                     'timestamp':when,'frame_url':frame_url,'frame_sha256':sha256_file(frame),'frame_size':[fw,fh],
                     'search_scope':audit['search_scope'],'sampled_frames':audit['sampled_frames']}
                 audit.update(status='found',location=location)
-                return {'answer':('已在视频帧中确认目标文字，请查看高亮。' if request.action=='highlight_text' else '已在视频帧中确认目标文字，请查看框选。'),
+                message=('The text is confirmed in the video frame. Please see the highlight.' if request.action=='highlight_text'
+                         else 'The text is confirmed in the video frame. Please see the outline.') if audit.get('response_language')=='en' else (
+                         '已在视频帧中确认目标文字，请查看高亮。' if request.action=='highlight_text' else '已在视频帧中确认目标文字，请查看框选。')
+                return {'answer':message,
                     'uncertain':False,'seek_time':when,'boxes':[box_result],'text_location':location,
                     'evidence':[{'source':'verified_video_frame','page_number':scene.get('page_number'),
                         'start':when,'end':when,'quote':review.text,'image_url':frame_url,

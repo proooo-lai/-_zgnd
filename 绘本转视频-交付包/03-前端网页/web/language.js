@@ -4,7 +4,7 @@
  * 其它地方一律读这里，不再出现「语言」选项。
  *
  *   BOOK  绘本语言   ← book.language（服务端识别中文 / English）
- *   HEARD 提问语言   ← 语音提问转写后自动检测，只影响本轮回答
+ *   HEARD 提问语言   ← 当前文字问题或语音转写，只影响本轮回答
  *
  * 下游约定：
  *   - 成片：旁白、字幕、视频提示词都用 promptLanguage()（= BOOK）
@@ -28,10 +28,17 @@
     return null;
   }
 
-  /** 文本 → 'zh' | 'en' | null。中文字符占比明显时判为中文。 */
+  function unquoted(text) {
+    return text.replace(/“[^”]*”|「[^」]*」|『[^』]*』|"[^"\n]*"/g," ").replace(/(?<!\w)'[^'\n]+'(?!\w)/g," ");
+  }
+
+  /** 当前指令语言，引用的目标原文和短的外语角色名不改变回答语言。 */
   function detect(text) {
     if (!text) return null;
-    const s = String(text);
+    let s = unquoted(String(text));
+    if (/用英[文语]|英[文语]回答|(?:answer|reply|respond)\s+in\s+English/i.test(s)) return "en";
+    if (/用中[文语]|中文回答|(?:answer|reply|respond)\s+in\s+Chinese/i.test(s)) return "zh";
+    if (!/[\u3400-\u9fffA-Za-z]/.test(s)) s=String(text);
     const cjk = (s.match(/[\u3400-\u9fff]/g) || []).length;
     const latin = (s.match(/[A-Za-z]/g) || []).length;
     if (!cjk && !latin) return null;
@@ -71,7 +78,7 @@
     return State.BOOK;
   }
 
-  /** 语音提问转写后调用：只影响本轮回答语言，不改绘本语言。 */
+  /** 每次文字提问或语音转写调用；不改绘本语言。 */
   function noteHeard(text) {
     const code = detect(text);
     if (code && code !== State.HEARD) { State.HEARD = code; emit(); }
@@ -90,7 +97,7 @@
   function statusText() {
     if (!State.BOOK) return "语言：自动识别（导入后确定中文 / English），无需手动选择。";
     const heard = State.HEARD && State.HEARD !== State.BOOK ? " · 最近提问用 " + label(State.HEARD) : "";
-    return "语言：" + label(State.BOOK) + "（自动识别）" + heard + " · 成片、回答与朗读都跟随它。";
+    return "绘本语言：" + label(State.BOOK) + "（自动识别）" + heard + " · 中文提问用中文回答，英文提问用英文回答，回答语音跟随本轮语言。";
   }
 
   global.Language = {

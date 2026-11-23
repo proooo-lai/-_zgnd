@@ -81,6 +81,8 @@ MiniMax 视频服务的开通入口与本机填写步骤见 [视频服务配置�
 
 ## 验证
 
+已有带配音成片可用 `tools/import_video_book.py` 关联原书 PDF、SRT 和私有时间线清单导入书架。页面标为“导入视频 · 全书测试”，原片音轨保持不变；`--cached-only` 仅复用有效读图缓存，缺页明确标注且不调用模型。命令、数据边界及实测限制见 [既有成片导入记录](docs/imported-video-2026-11-23.md)。
+
 ```sh
 .venv/bin/python -m pytest -q
 .venv/bin/python tools/make_demo_book.py --pdf /path/to/authorized.pdf --book-id unique-demo

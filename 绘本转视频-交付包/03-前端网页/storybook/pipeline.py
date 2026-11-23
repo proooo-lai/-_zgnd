@@ -284,7 +284,7 @@ def provider_identity(provider, settings, name):
                                     "max_tokens": 7000, "parse_retry_max_tokens": 8192}}
 
 
-async def _vision_cached(provider, prompt: str, image: Path, settings) -> dict:
+async def _vision_cached(provider, prompt: str, image: Path, settings, *, cache_only=False) -> dict | None:
     identity = {"cache_version": VISION_CACHE_VERSION, "schema_version": SCHEMA_VERSION,
                 "provider": provider_identity(provider, settings, "vision"),
                 "image_sha256": sha256_file(image),
@@ -301,6 +301,8 @@ async def _vision_cached(provider, prompt: str, image: Path, settings) -> dict:
                         "created_at": entry["created_at"], "validation": entry["validation"]}}
         except (ValueError, OSError, KeyError, TypeError):
             pass
+    if cache_only:
+        return None
     for attempt in range(3):
         try:
             result = VisualPageResult.model_validate(await provider.vision(prompt, [image])).model_dump()

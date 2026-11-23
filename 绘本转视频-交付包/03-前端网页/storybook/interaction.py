@@ -103,6 +103,8 @@ def scene_at(book, timestamp):
     for scene in scenes:
         if scene["start"] <= timestamp < scene["end"]:
             return scene
+    if book.get("mode") == "imported_video":
+        return None
     return scenes[-1] if scenes and timestamp >= scenes[-1]["end"] else (scenes[0] if scenes else None)
 
 

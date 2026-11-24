@@ -57,6 +57,26 @@ fetch=async(path,options)=>{if(path.endsWith('/cancel'))return response({cancell
     assert any("Story-backed answer." in text for text in result["texts"])
 
 
+def test_unmapped_frame_has_timestamp_without_fake_page_number():
+    result = run_ui(r'''
+fetch=async(path,options)=>{const data=child(JSON.parse(options.body).agent_id,'bird');data.agent.page_number=null;return response(data)};
+(async()=>{await ObjectAssistant.open(snapshot);console.log(JSON.stringify({meta:$('object-meta').textContent}));ObjectAssistant.close()})()
+''')
+    assert "null" not in result["meta"] and "undefined" not in result["meta"]
+    assert "8" in result["meta"]
+
+
+def test_frame_answer_shows_timestamp_and_actual_image_evidence():
+    result = run_ui(r'''
+fetch=async(path,options)=>{const data=child(JSON.parse(options.body).agent_id,'bird');data.agent.page_number=null;
+data.result.frame_evidence={source:'actual_video_frame',time:8,image_url:'/media/book/turns/t/frame.jpg'};return response(data)};
+(async()=>{await ObjectAssistant.open(snapshot);const row=$('object-history').children[0];
+const details=row.children.find(x=>x.tag==='details');console.log(JSON.stringify({summary:details.children[0].textContent,image:details.children[1].src}));ObjectAssistant.close()})()
+''')
+    assert "8" in result["summary"] and "视频画面" in result["summary"]
+    assert result["image"] == "/media/book/turns/t/frame.jpg"
+
+
 def test_recognized_object_automatically_loads_evidenced_background_without_playing_over_intro():
     result = run_ui(r'''
 const calls=[],played=[];Audio.prototype.play=function(){played.push(this.src);return Promise.resolve()};

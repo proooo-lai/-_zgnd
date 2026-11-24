@@ -16,7 +16,7 @@ from PIL import Image
 from .interaction import selected_object
 from .schema import write_json
 
-BACKGROUND_VERSION = "object-background-source-visual-v4"
+BACKGROUND_VERSION = "object-background-source-visual-v5"
 
 
 class ObjectAgents:
@@ -144,6 +144,14 @@ class ObjectAgents:
                         "请根据原书证据，用一至三句话介绍这个对象在当前原书页中可确认的情节或作用，并引用支持页码。"
                         "有可靠证据时再补充故事关系。姓名、动机和身世不是必答项，未知就不补写；"
                         "不以外貌、百科常识或之前的介绍代替故事证据。")
+            if context.get("page_number") is None:
+                question = ("This frame has no confirmed source page. Compare the selected object with the supplied original book evidence, "
+                            "then briefly introduce only a confirmed matching event or role and cite its source pages. "
+                            "Do not infer a page from playback time. Unknown name, motives and past can be omitted. "
+                            "If the visual correspondence is ambiguous, say that its story background cannot be confirmed. Answer in English."
+                            if english else
+                            "当前帧没有确定的原书页码。请将点选对象与所提供的原书证据对照，只介绍能确认对应的情节或作用，并引用实际支持页码。"
+                            "不得根据播放时间猜页码；姓名、动机和身世未知可省略。若画面对应关系不明确，说明暂无法确认原书背景。")
             result = await self.interactor.ask(book_id, question, **self.parameters(book_id, agent_id, parent),
                                                input_kind="object_background", voice=voice)
             result.update(background_state="supported" if not result.get("uncertain") and result.get("evidence") else "unconfirmed",

@@ -30,7 +30,7 @@ async def joined(*calls):
 
 
 async def draft_followup(provider, question: str, selected: dict, pages: list,
-                         current_page: int, frame: Path, language: str, prior_turns=()):
+                         current_page: int | None, frame: Path, language: str, prior_turns=()):
     output_language = "English" if language == "en" else "中文"
     references = [{"question": t.get("question"), "answer": t.get("answer"), "status": t.get("status")}
                   for t in prior_turns[-12:]]
@@ -59,4 +59,4 @@ async def draft_followup(provider, question: str, selected: dict, pages: list,
     except ValidationError:
         return None
     return {"answer": action.answer, "uncertain": action.uncertain, "evidence_scope": "current_frame",
-            "evidence_pages": [current_page], "story_context": story.model_dump()}
+            "evidence_pages": [current_page] if current_page is not None else [], "story_context": story.model_dump()}

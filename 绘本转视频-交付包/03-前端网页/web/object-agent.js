@@ -143,6 +143,13 @@ window.ObjectAssistant = (() => {
       details.append(summary,node("blockquote","",evidence.quote||evidence.description||"请对照该页核验。"));row.append(details);
     }
     replayButton(view,result.audio_url,"播放回答",row);
+    if(result.frame_evidence?.source==="actual_video_frame") {
+      const details=node("details","object-evidence");
+      details.append(node("summary","",fmt(result.frame_evidence.time)+" 的视频画面依据"));
+      const url=imageURL(result.frame_evidence.image_url);
+      if(url){const image=node("img");image.src=url;image.alt="本次点选时冻结的视频画面";image.style.maxWidth="100%";details.append(image);}
+      row.append(details);
+    }
     if(!result.audio_url)for(const chunk of result.audio_chunks||[])replayButton(view,typeof chunk==="string"?chunk:chunk.url||chunk.audio_url,"重听已生成片段",row);
     return !partial&&!audioFailed;
   }
@@ -233,7 +240,7 @@ window.ObjectAssistant = (() => {
       view.agent=data.agent;
       view.ready=true;
       $("object-title").textContent=view.agent.label+" · 小助手";
-      $("object-meta").textContent="第 "+view.agent.page_number+" 页 · "+fmt(view.agent.time)+" 的画面";
+      $("object-meta").textContent=(Number.isInteger(view.agent.page_number)?"第 "+view.agent.page_number+" 页 · ":"")+fmt(view.agent.time)+" 的画面";
       const avatar=imageURL(view.agent.avatar_url);if(avatar)$("object-avatar").src=avatar;
       render(view,data.result);message("只在这个窗口聊天。可输入问题，或点击“说话”。");
       if(data.result.audio_url){audio.src=safeURL(data.result.audio_url)||"";audio.onplaying=()=>metric(view,context,data.result.turn_id,"audio_playing");audio.play().catch(()=>message("点击“播放回答”收听介绍。"));}
